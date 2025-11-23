@@ -1,0 +1,341 @@
+"""Telemetry service - manages telemetry state and broadcasting"""
+import asyncio
+from typing import Dict, List, Set, Optional
+from datetime import datetime
+import json
+
+
+def get_attr(obj, *names, default=None):
+    """Get attribute from object, trying multiple names (for library compatibility)"""
+    for name in names:
+        val = getattr(obj, name, None)
+        if val is not None:
+            return val
+    return default
+
+
+class TelemetryService:
+    """Manages telemetry data and broadcasts to connected clients"""
+
+    def __init__(self):
+        self.current_state = {
+            "session": {},
+            "cars": {},
+            "timing": [],
+            "participants": {},
+            "last_update": None
+        }
+        self.websocket_clients: Set = set()
+        self.recording_enabled = False
+        self.recorded_packets = []
+        self.session_start_time = None
+
+    def add_websocket_client(self, websocket):
+        """Add a WebSocket client"""
+        self.websocket_clients.add(websocket)
+
+    def remove_websocket_client(self, websocket):
+        """Remove a WebSocket client"""
+        if websocket in self.websocket_clients:
+            self.websocket_clients.remove(websocket)
+
+    async def handle_packet(self, packet_type_id: int, packet):
+        """Process received packet and update state"""
+        try:
+            # Packet type IDs: 0=Motion, 1=Session, 2=LapData, 4=Participants, 6=CarTelemetry, 7=CarStatus, 10=CarDamage
+            if packet_type_id == 1:  # SESSION
+                await self._handle_session_packet(packet)
+            elif packet_type_id == 4:  # PARTICIPANTS
+                await self._handle_participants_packet(packet)
+            elif packet_type_id == 2:  # LAP_DATA
+                await self._handle_lap_data_packet(packet)
+            elif packet_type_id == 6:  # CAR_TELEMETRY
+                await self._handle_telemetry_packet(packet)
+            elif packet_type_id == 7:  # CAR_STATUS
+                await self._handle_status_packet(packet)
+            elif packet_type_id == 10:  # CAR_DAMAGE
+                await self._handle_damage_packet(packet)
+            elif packet_type_id == 0:  # MOTION
+                await self._handle_motion_packet(packet)
+
+            # Record packet if recording is enabled
+            if self.recording_enabled:
+                self.recorded_packets.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "type": packet_type_id,
+                    "data": self._serialize_packet(packet)
+                })
+
+        except Exception as e:
+            print(f"Error handling packet: {e}")
+
+    async def _handle_session_packet(self, packet):
+        """Handle session data packet"""
+        # Helper to get enum name safely
+        def get_enum_name(val):
+            return val.name if hasattr(val, 'name') else str(val)
+
+        header = get_attr(packet, 'header', 'm_header')
+        if not header:
+            return
+
+        self.current_state["session"] = {
+            "session_uid": get_attr(header, 'session_uid', 'sessionUID', 'm_sessionUID', default=0),
+            "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
+            "session_type": get_enum_name(get_attr(packet, 'session_type', 'sessionType', 'm_sessionType')),
+            "track_id": get_enum_name(get_attr(packet, 'track_id', 'trackId', 'm_trackId')),
+            "weather": get_enum_name(get_attr(packet, 'weather', 'm_weather')),
+            "track_temperature": get_attr(packet, 'track_temperature', 'trackTemperature', 'm_trackTemperature', default=0),
+            "air_temperature": get_attr(packet, 'air_temperature', 'airTemperature', 'm_airTemperature', default=0),
+            "total_laps": get_attr(packet, 'total_laps', 'totalLaps', 'm_totalLaps', default=0),
+            "track_length": get_attr(packet, 'track_length', 'trackLength', 'm_trackLength', default=0),
+            "session_time_left": get_attr(packet, 'session_time_left', 'sessionTimeLeft', 'm_sessionTimeLeft', default=0),
+            "session_duration": get_attr(packet, 'session_duration', 'sessionDuration', 'm_sessionDuration', default=0),
+            "pit_speed_limit": get_attr(packet, 'pit_speed_limit', 'pitSpeedLimit', 'm_pitSpeedLimit', default=0),
+            "safety_car_status": get_attr(packet, 'safety_car_status', 'safetyCarStatus', 'm_safetyCarStatus', default=0),
+            "is_spectating": get_attr(packet, 'is_spectating', 'isSpectating', 'm_isSpectating', default=0),
+            "num_marshal_zones": get_attr(packet, 'num_marshal_zones', 'numMarshalZones', 'm_numMarshalZones', default=0),
+            "forecast_accuracy": get_attr(packet, 'forecast_accuracy', 'forecastAccuracy', 'm_forecastAccuracy', default=0)
+        }
+        await self._broadcast_update("session", self.current_state["session"])
+
+    async def _handle_participants_packet(self, packet):
+        """Handle participants data packet"""
+        def get_enum_name(val):
+            return val.name if hasattr(val, 'name') else str(val)
+
+        num_active = get_attr(packet, 'num_active_cars', 'numActiveCars', 'm_numActiveCars', default=22)
+        parts_list = get_attr(packet, 'participants', 'participants_data', 'm_participants', default=[])
+
+        participants = {}
+        for idx in range(min(num_active, len(parts_list))):
+            p = parts_list[idx]
+            # Decode name from bytes if needed
+            raw_name = get_attr(p, 'name', 'm_name', default='')
+            name = raw_name if isinstance(raw_name, str) else raw_name.decode('utf-8', errors='ignore').rstrip('\x00')
+            participants[idx] = {
+                "name": name,
+                "team_id": get_enum_name(get_attr(p, 'team_id', 'teamId', 'm_teamId')),
+                "race_number": get_attr(p, 'race_number', 'raceNumber', 'm_raceNumber', default=0),
+                "nationality": get_attr(p, 'nationality', 'm_nationality', default=0),
+                "ai_controlled": get_attr(p, 'ai_controlled', 'aiControlled', 'm_aiControlled', default=0)
+            }
+        self.current_state["participants"] = participants
+        await self._broadcast_update("participants", participants)
+
+    async def _handle_lap_data_packet(self, packet):
+        """Handle lap data packet"""
+        def get_enum_name(val):
+            return val.name if hasattr(val, 'name') else str(val)
+
+        timing_data = []
+        for idx, lap in enumerate(packet.m_lapData):
+            if idx in self.current_state["participants"]:
+                car_data = self.current_state["cars"].get(idx, {})
+                car_data.update({
+                    "position": lap.m_carPosition,
+                    "current_lap": lap.m_currentLapNum,
+                    "current_lap_time_ms": lap.m_currentLapTimeInMS,
+                    "last_lap_time_ms": lap.m_lastLapTimeInMS,
+                    "sector1_time_ms": lap.m_sector1TimeInMS,
+                    "sector2_time_ms": lap.m_sector2TimeInMS,
+                    "lap_distance": lap.m_lapDistance,
+                    "total_distance": lap.m_totalDistance,
+                    "delta_to_leader_ms": lap.m_deltaToRaceLeaderInMS,
+                    "delta_to_car_ahead_ms": lap.m_deltaToCarInFrontInMS,
+                    "pit_status": get_enum_name(lap.m_pitStatus),
+                    "num_pit_stops": lap.m_numPitStops,
+                    "sector": get_enum_name(lap.m_sector),
+                    "driver_status": get_enum_name(lap.m_driverStatus),
+                    "result_status": get_enum_name(lap.m_resultStatus),
+                    "penalties": lap.m_penalties
+                })
+                self.current_state["cars"][idx] = car_data
+
+                # Add to timing tower
+                if idx in self.current_state["participants"]:
+                    timing_data.append({
+                        "position": lap.m_carPosition,
+                        "car_index": idx,
+                        "driver_name": self.current_state["participants"][idx]["name"],
+                        "team": self.current_state["participants"][idx]["team_id"],
+                        "current_lap": lap.m_currentLapNum,
+                        "last_lap_time_ms": lap.m_lastLapTimeInMS,
+                        "gap_to_leader": self._format_time_delta(lap.m_deltaToRaceLeaderInMS),
+                        "interval": self._format_time_delta(lap.m_deltaToCarInFrontInMS),
+                        "pit_stops": lap.m_numPitStops,
+                        "penalties": lap.m_penalties
+                    })
+
+        # Sort by position
+        timing_data.sort(key=lambda x: x["position"])
+        self.current_state["timing"] = timing_data
+        await self._broadcast_update("timing", timing_data)
+
+    async def _handle_telemetry_packet(self, packet):
+        """Handle car telemetry packet"""
+        def get_enum_name(val):
+            return val.name if hasattr(val, 'name') else str(val)
+
+        for idx, telemetry in enumerate(packet.m_carTelemetryData):
+            if idx in self.current_state["participants"]:
+                car_data = self.current_state["cars"].get(idx, {})
+                car_data.update({
+                    "speed": telemetry.m_speed,
+                    "gear": telemetry.m_gear,
+                    "rpm": telemetry.m_engineRPM,
+                    "throttle": round(telemetry.m_throttle, 3),
+                    "brake": round(telemetry.m_brake, 3),
+                    "steer": round(telemetry.m_steer, 3),
+                    "clutch": telemetry.m_clutch,
+                    "drs": get_enum_name(telemetry.m_drs),
+                    "rev_lights_percent": telemetry.m_revLightsPercent,
+                    "brakes_temp": list(telemetry.m_brakesTemperature),
+                    "tyres_surface_temp": list(telemetry.m_tyresSurfaceTemperature),
+                    "tyres_inner_temp": list(telemetry.m_tyresInnerTemperature),
+                    "engine_temp": telemetry.m_engineTemperature,
+                    "tyres_pressure": [round(p, 2) for p in telemetry.m_tyresPressure]
+                })
+                self.current_state["cars"][idx] = car_data
+
+        # Broadcast player car telemetry
+        player_idx = packet.m_header.m_playerCarIndex
+        if player_idx in self.current_state["cars"]:
+            await self._broadcast_update("player_telemetry",
+                                        self.current_state["cars"][player_idx])
+
+    async def _handle_status_packet(self, packet):
+        """Handle car status packet"""
+        def get_enum_name(val):
+            return val.name if hasattr(val, 'name') else str(val)
+
+        for idx, status in enumerate(packet.m_carStatusData):
+            if idx in self.current_state["participants"]:
+                car_data = self.current_state["cars"].get(idx, {})
+                car_data.update({
+                    "fuel_in_tank": round(status.m_fuelInTank, 2),
+                    "fuel_capacity": round(status.m_fuelCapacity, 2),
+                    "fuel_remaining_laps": round(status.m_fuelRemainingLaps, 2),
+                    "fuel_mix": status.m_fuelMix,
+                    "front_brake_bias": status.m_frontBrakeBias,
+                    "drs_allowed": get_enum_name(status.m_drsAllowed),
+                    "tyre_compound": get_enum_name(status.m_actualTyreCompound),
+                    "tyre_visual_compound": get_enum_name(status.m_visualTyreCompound),
+                    "tyre_age_laps": status.m_tyresAgeLaps,
+                    "ers_store_energy": round(status.m_ersStoreEnergy, 2),
+                    "ers_deploy_mode": get_enum_name(status.m_ersDeployMode),
+                    "ers_harvested_mguk": round(status.m_ersHarvestedThisLapMGUK, 2),
+                    "ers_harvested_mguh": round(status.m_ersHarvestedThisLapMGUH, 2),
+                    "ers_deployed": round(status.m_ersDeployedThisLap, 2),
+                    "max_rpm": status.m_maxRPM,
+                    "idle_rpm": status.m_idleRPM
+                })
+                self.current_state["cars"][idx] = car_data
+
+    async def _handle_damage_packet(self, packet):
+        """Handle car damage packet"""
+        for idx, damage in enumerate(packet.m_carDamageData):
+            if idx in self.current_state["participants"]:
+                car_data = self.current_state["cars"].get(idx, {})
+                car_data.update({
+                    "tyres_wear": [round(w, 1) for w in damage.m_tyresWear],
+                    "tyres_damage": list(damage.m_tyresDamage),
+                    "brakes_damage": list(damage.m_brakesDamage),
+                    "front_left_wing_damage": damage.m_frontLeftWingDamage,
+                    "front_right_wing_damage": damage.m_frontRightWingDamage,
+                    "rear_wing_damage": damage.m_rearWingDamage,
+                    "floor_damage": damage.m_floorDamage,
+                    "diffuser_damage": damage.m_diffuserDamage,
+                    "engine_damage": damage.m_engineDamage,
+                    "gearbox_damage": damage.m_gearBoxDamage
+                })
+                self.current_state["cars"][idx] = car_data
+
+    async def _handle_motion_packet(self, packet):
+        """Handle motion packet"""
+        positions = []
+        for idx, motion in enumerate(packet.m_carMotionData):
+            if idx in self.current_state["participants"]:
+                car_data = self.current_state["cars"].get(idx, {})
+                car_data.update({
+                    "world_pos_x": round(motion.m_worldPositionX, 2),
+                    "world_pos_y": round(motion.m_worldPositionY, 2),
+                    "world_pos_z": round(motion.m_worldPositionZ, 2),
+                    "g_force_lat": round(motion.m_gForceLateral, 2),
+                    "g_force_long": round(motion.m_gForceLongitudinal, 2),
+                    "g_force_vert": round(motion.m_gForceVertical, 2)
+                })
+                self.current_state["cars"][idx] = car_data
+
+                # Collect position for track map
+                positions.append({
+                    "car_index": idx,
+                    "position": car_data.get("position", 0),
+                    "x": car_data["world_pos_x"],
+                    "y": car_data["world_pos_y"],
+                    "z": car_data["world_pos_z"]
+                })
+
+        # Broadcast car positions for track map
+        await self._broadcast_update("car_positions", positions)
+
+    async def _broadcast_update(self, update_type: str, data):
+        """Broadcast update to all connected WebSocket clients"""
+        if not self.websocket_clients:
+            return
+
+        message = json.dumps({
+            "type": update_type,
+            "data": data,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        # Send to all clients
+        disconnected = set()
+        for client in self.websocket_clients:
+            try:
+                await client.send_text(message)
+            except Exception as e:
+                print(f"Error sending to client: {e}")
+                disconnected.add(client)
+
+        # Remove disconnected clients
+        self.websocket_clients -= disconnected
+
+    def _format_time_delta(self, delta_ms: int) -> str:
+        """Format time delta in milliseconds to string"""
+        if delta_ms == 0:
+            return "Leader"
+        elif delta_ms < 0:
+            return f"-{abs(delta_ms) / 1000:.3f}s"
+        else:
+            return f"+{delta_ms / 1000:.3f}s"
+
+    def _serialize_packet(self, packet) -> dict:
+        """Serialize packet to dict for recording"""
+        # This is a simplified serialization
+        # In production, you'd want a more comprehensive approach
+        return {"serialized": True}
+
+    def get_current_state(self) -> dict:
+        """Get current telemetry state"""
+        return self.current_state
+
+    def start_recording(self):
+        """Start recording session"""
+        self.recording_enabled = True
+        self.recorded_packets = []
+        self.session_start_time = datetime.now()
+
+    def stop_recording(self) -> dict:
+        """Stop recording and return session data"""
+        self.recording_enabled = False
+        return {
+            "started_at": self.session_start_time.isoformat(),
+            "ended_at": datetime.now().isoformat(),
+            "packets": self.recorded_packets
+        }
+
+    def is_recording(self) -> bool:
+        """Check if currently recording"""
+        return self.recording_enabled

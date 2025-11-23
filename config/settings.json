@@ -1,0 +1,42 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "udp": {
+    "host": "",
+    "port": 20777,
+    "timeout": 30
+  },
+  "display": {
+    "theme": "dark",
+    "units": {
+      "speed": "kmh",
+      "temperature": "celsius",
+      "pressure": "psi"
+    },
+    "updateRate": 60,
+    "smoothing": true
+  },
+  "recording": {
+    "enabled": true,
+    "autoSave": true,
+    "maxSessions": 50,
+    "compressionEnabled": true
+  },
+  "features": {
+    "timingTower": true,
+    "trackMap": true,
+    "driverPanel": true,
+    "tyreData": true,
+    "fuelERS": true,
+    "deltaDisplay": true,
+    "sessionInfo": true
+  },
+  "advanced": {
+    "packetBufferSize": 1000,
+    "websocketHeartbeat": 30,
+    "maxReconnectAttempts": 10,
+    "reconnectInterval": 3000
+  }
+}
