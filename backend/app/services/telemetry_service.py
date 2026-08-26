@@ -9,6 +9,7 @@ from app.utils.enums import (
     DRS_ALLOWED, ERS_DEPLOY_MODE, FUEL_MIX, format_enum
 )
 from app.services.race_recap_service import RaceRecapService
+from app.services.pit_loss_service import PitLossService, condition_from_safety_car_status
 
 
 def get_attr(obj, *names, default=None):
@@ -39,7 +40,8 @@ class TelemetryService:
             "race_strategy": {
                 "tire_allocation": {"soft": 0, "medium": 0, "hard": 0, "inter": 0, "wet": 0},
                 "planned_pit_stops": []
-            }
+            },
+            "pit_loss": None,  # {track_id, condition, losses, prediction}
         }
         self.websocket_clients: Set = set()
         self.recording_enabled = False
@@ -50,6 +52,9 @@ class TelemetryService:
         self.last_sectors = {}  # Track last sector to detect sector changes: {car_index: sector_num}
         self.race_recap_service = RaceRecapService()  # Race recap and history service
         self.last_positions = {}  # Track last position for each car to detect position changes
+        self.pit_loss_service = PitLossService()  # 内置固定进站损失表 (按站×条件)
+        self._last_session_uid = None  # Detect new race via session_uid change
+        self._pit_condition = "green"  # Current track condition (green/sc/ds)
 
     def add_websocket_client(self, websocket):
         """Add a WebSocket client"""
@@ -96,6 +101,15 @@ class TelemetryService:
         if not header:
             return
 
+        # F1 24 generates a new session_uid per race/session; a pit stop within
+        # the same race keeps the uid. Only reset when the uid actually changes.
+        new_uid = get_attr(header, 'session_uid', 'sessionUID', 'm_sessionUID', default=0)
+        if self._last_session_uid is not None and new_uid != self._last_session_uid:
+            print(f"🆕 New session detected (uid {self._last_session_uid} -> {new_uid}), clearing per-race state")
+            self._reset_race_state()
+            await self._broadcast_update("session_reset", {"reason": "new_session_uid"})
+        self._last_session_uid = new_uid
+
         session_type = format_enum(get_attr(packet, 'session_type', 'sessionType', 'm_sessionType'), SESSION_TYPES)
 
         self.current_state["session"] = {
@@ -114,7 +128,8 @@ class TelemetryService:
             "safety_car_status": get_attr(packet, 'safety_car_status', 'safetyCarStatus', 'm_safetyCarStatus', default=0),
             "is_spectating": get_attr(packet, 'is_spectating', 'isSpectating', 'm_isSpectating', default=0),
             "num_marshal_zones": get_attr(packet, 'num_marshal_zones', 'numMarshalZones', 'm_numMarshalZones', default=0),
-            "forecast_accuracy": get_attr(packet, 'forecast_accuracy', 'forecastAccuracy', 'm_forecastAccuracy', default=0)
+            "forecast_accuracy": get_attr(packet, 'forecast_accuracy', 'forecastAccuracy', 'm_forecastAccuracy', default=0),
+            "weather_forecast_samples": self._extract_forecast(packet),
         }
 
         # Start race tracking if this is a race session and not already started
@@ -122,7 +137,46 @@ class TelemetryService:
             self.race_recap_service.start_race_tracking(self.current_state["session"])
             print(f"🏁 Started tracking {session_type} at {self.current_state['session']['track_id']}")
 
+        # Update current pit condition for pit-loss learning
+        self._pit_condition = condition_from_safety_car_status(
+            self.current_state["session"].get("safety_car_status", 0)
+        )
+
         await self._broadcast_update("session", self.current_state["session"])
+
+    @staticmethod
+    def _extract_forecast(packet):
+        """WeatherForecastSample 列表 -> 可序列化 dict 列表 (游戏每 3 分钟一个样本)."""
+        raw = get_attr(packet, 'weather_forecast_samples', 'weatherForecastSamples',
+                       'm_weatherForecastSamples', default=[])
+        samples = []
+        for f in raw:
+            if f is None:
+                continue
+            samples.append({
+                "time_offset": get_attr(f, 'time_offset', 'timeOffset', 'm_timeOffset', default=0),
+                "weather": format_enum(get_attr(f, 'weather', 'm_weather'), WEATHER),
+                "track_temperature": get_attr(f, 'track_temperature', 'trackTemperature', 'm_trackTemperature', default=0),
+                "track_temperature_change": get_attr(f, 'track_temperature_change', 'trackTemperatureChange', 'm_trackTemperatureChange', default=0),
+                "air_temperature": get_attr(f, 'air_temperature', 'airTemperature', 'm_airTemperature', default=0),
+                "air_temperature_change": get_attr(f, 'air_temperature_change', 'airTemperatureChange', 'm_airTemperatureChange', default=0),
+                "rain_percentage": get_attr(f, 'rain_percentage', 'rainPercentage', 'm_rainPercentage', default=0),
+            })
+        return samples
+
+    def _reset_race_state(self):
+        """Clear all per-race state when a new session starts (session_uid changed)."""
+        self.current_state["lap_history"] = {}
+        self.current_state["best_sectors"] = {}
+        self.current_state["current_lap_sectors"] = {}
+        self.current_state["starting_grid"] = {}
+        self.current_state["pit_loss"] = None
+        self.sector_times_cache = {}
+        self.last_lap_numbers = {}
+        self.last_sectors = {}
+        self.last_positions = {}
+        self.race_recap_service.reset_session()
+        print("🔄 Per-race state cleared")
 
     async def _handle_participants_packet(self, packet):
         """Handle participants data packet"""
@@ -408,6 +462,64 @@ class TelemetryService:
             # Broadcast player car data (includes sector info)
             if player_idx in self.current_state["cars"]:
                 await self._broadcast_update("player_telemetry", self.current_state["cars"][player_idx])
+
+        # Broadcast pit-stop loss stats + position-drop prediction
+        await self._broadcast_pit_loss()
+
+    def compute_pit_loss_state(self):
+        """Build the pit-loss stats + position-drop prediction payload."""
+        player_idx = self.current_state.get("player_car_index")
+        cars = self.current_state.get("cars", {})
+        if player_idx is None or player_idx not in cars:
+            return None
+        track_id = self.current_state.get("session", {}).get("track_id")
+        if not track_id:
+            return None
+
+        player = cars[player_idx]
+        pos = player.get("position") or 0
+        lead = player.get("delta_to_leader_ms") or 0
+        stats = self.pit_loss_service.stats(track_id)
+
+        prediction = {}
+        for cond in ("green", "sc", "ds"):
+            loss = stats[cond]["loss_ms"]
+            if pos <= 0:
+                prediction[cond] = None
+                continue
+            # Cars currently behind us that would be ahead after our stop
+            # (their gap to leader <= our gap + our pit loss).
+            behind = 0
+            for idx, car in cars.items():
+                if idx == player_idx:
+                    continue
+                cpos = car.get("position") or 999
+                if cpos > pos:
+                    delta = car.get("delta_to_leader_ms")
+                    if delta is not None and delta <= lead + loss:
+                        behind += 1
+            prediction[cond] = pos + behind
+
+        return {
+            "track_id": track_id,
+            "condition": self._pit_condition,
+            "losses": stats,
+            "prediction": {
+                "current_position": pos,
+                "predicted": prediction,
+            },
+        }
+
+    async def _broadcast_pit_loss(self):
+        """Broadcast pit-loss stats + prediction to clients."""
+        try:
+            payload = self.compute_pit_loss_state()
+            if payload is None:
+                return
+            self.current_state["pit_loss"] = payload
+            await self._broadcast_update("pit_loss", payload)
+        except Exception as e:
+            print(f"pit_loss broadcast error: {e}")
 
     async def _handle_telemetry_packet(self, packet):
         """Handle car telemetry packet"""

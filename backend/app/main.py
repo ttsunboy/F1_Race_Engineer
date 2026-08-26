@@ -4,6 +4,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
+from pydantic import BaseModel, Field
 
 from .config import settings
 from .udp.receiver import UDPTelemetryReceiver
@@ -74,6 +75,71 @@ async def health_check():
         },
         "websocket_clients": len(telemetry_service.websocket_clients),
         "recording": telemetry_service.is_recording()
+    }
+
+
+class UDPConfigRequest(BaseModel):
+    """Request body for updating UDP listener configuration"""
+    udp_host: str = ""
+    udp_port: int = Field(default=20777, ge=1, le=65535)
+
+
+@app.get("/api/config/udp")
+async def get_udp_config():
+    """Get current UDP listener configuration"""
+    return {
+        "udp_host": udp_receiver.host,
+        "udp_port": udp_receiver.port,
+        "running": udp_receiver.running,
+    }
+
+
+@app.post("/api/config/udp")
+async def set_udp_config(config: UDPConfigRequest):
+    """Update UDP listener configuration and restart the receiver in place"""
+    new_host = config.udp_host.strip() if config.udp_host else ""
+    new_host = new_host if new_host else "0.0.0.0"
+    new_port = config.udp_port
+
+    # Remember current config so we can roll back on failure
+    old_host = udp_receiver.host
+    old_port = udp_receiver.port
+
+    try:
+        await udp_receiver.stop()
+        udp_receiver.set_config(new_host, new_port)
+        await udp_receiver.start()
+    except Exception as e:
+        # Attempt rollback so the dashboard is not left without a receiver
+        try:
+            udp_receiver.set_config(old_host, old_port)
+            await udp_receiver.start()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to apply UDP config: {str(e)}",
+        )
+
+    return {
+        "status": "ok",
+        "udp_host": udp_receiver.host,
+        "udp_port": udp_receiver.port,
+        "running": udp_receiver.running,
+    }
+
+
+# Pit Stop Loss / Position Drop Prediction (built-in fixed table, read-only)
+
+@app.get("/api/pitloss")
+async def get_pit_loss():
+    """Get pit loss stats (内置固定表) + position-drop prediction for current race"""
+    state = telemetry_service.get_current_state()
+    return state.get("pit_loss") or {
+        "track_id": None,
+        "condition": "green",
+        "losses": None,
+        "prediction": None,
     }
 
 

@@ -3,7 +3,6 @@
  */
 import { useState, useEffect } from 'react';
 import { useTelemetry } from '@/hooks/useTelemetry';
-import { useTelemetryStore } from '@/store/telemetryStore';
 import { TimingTower } from '@/components/TimingTower';
 import { DriverPanel } from '@/components/DriverPanel';
 import { TyreData } from '@/components/TyreData';
@@ -15,12 +14,14 @@ import { LapHistory } from '@/components/LapHistory';
 import { RaceStrategy } from '@/components/RaceStrategy';
 import { RaceHistory } from '@/components/RaceHistory';
 import { RaceRecap } from '@/components/RaceRecap';
+import { SettingsModal } from '@/components/SettingsModal';
 import { Settings, Maximize2, Minimize2, Trophy, Gauge } from 'lucide-react';
 
 function App() {
   const { isConnected } = useTelemetry();
   const [darkMode, setDarkMode] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'history'>('dashboard');
   const [selectedRaceId, setSelectedRaceId] = useState<string | null>(null);
   const [showRaceFinishedModal, setShowRaceFinishedModal] = useState(false);
@@ -113,9 +114,9 @@ function App() {
                   {fullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
                 </button>
                 <button
-                  onClick={() => setDarkMode(!darkMode)}
+                  onClick={() => setShowSettings(true)}
                   className="p-2 hover:bg-f1-gray rounded-lg transition-colors"
-                  title="Toggle theme"
+                  title="Settings"
                 >
                   <Settings className="w-5 h-5" />
                 </button>
@@ -164,6 +165,14 @@ function App() {
         {selectedRaceId && (
           <RaceRecap raceId={selectedRaceId} onClose={handleCloseRecap} />
         )}
+
+        {/* Settings Modal */}
+        <SettingsModal
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+        />
 
         {/* Race Finished Notification */}
         {showRaceFinishedModal && (

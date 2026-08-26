@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { Plus, Trash2, Flag, TrendingUp, TrendingDown } from 'lucide-react';
+import { PitStopPrediction } from '@/components/PitStopPrediction';
 
 export const RaceStrategy: React.FC = () => {
   const raceStrategy = useTelemetryStore((state) => state.race_strategy);
@@ -58,6 +59,9 @@ export const RaceStrategy: React.FC = () => {
       <h2 className="text-lg font-bold text-white mb-4">Race Strategy</h2>
 
       <div className="flex-1 overflow-y-auto space-y-4">
+        {/* Pit Loss / Position Drop Prediction */}
+        <PitStopPrediction />
+
         {/* Starting Position */}
         {startingGrid && (
           <div className="bg-f1-darker rounded-lg p-4">

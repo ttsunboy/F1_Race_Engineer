@@ -42,6 +42,7 @@ const initialState: TelemetryState = {
     tire_allocation: { soft: 0, medium: 0, hard: 0, inter: 0, wet: 0 },
     planned_pit_stops: []
   },
+  pit_loss: null,
   connected: false,
   last_update: null,
 };
@@ -146,7 +147,7 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
           // Find player car index from participants (ai_controlled === 0)
           const participants = get().participants;
           const playerIndex = Object.entries(participants).find(
-            ([_, p]) => p.ai_controlled === 0
+            ([_, p]) => p.ai_controlled === false
           )?.[0];
 
           if (playerIndex !== undefined) {
@@ -178,6 +179,25 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
       case 'starting_grid':
         set({
           starting_grid: data,
+          last_update: new Date().toISOString(),
+        });
+        break;
+
+      case 'pit_loss':
+        set({
+          pit_loss: data,
+          last_update: new Date().toISOString(),
+        });
+        break;
+
+      case 'session_reset':
+        // New race started (session_uid changed) - clear per-race state
+        set({
+          lap_history: [],
+          best_sectors: null,
+          current_lap_sectors: null,
+          starting_grid: null,
+          pit_loss: null,
           last_update: new Date().toISOString(),
         });
         break;

@@ -107,7 +107,6 @@ export const DriverPanel: React.FC = () => {
   const getLiveDelta = (): number | null => {
     if (!bestSectors || !playerCar.current_lap_time_ms) return null;
 
-    const currentLapTime = playerCar.current_lap_time_ms;
     const sector = currentSector;
 
     // Calculate theoretical best time up to current position

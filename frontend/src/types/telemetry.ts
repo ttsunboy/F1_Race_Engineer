@@ -19,6 +19,17 @@ export interface SessionData {
   is_spectating: boolean;
   num_marshal_zones: number;
   forecast_accuracy: number;
+  weather_forecast_samples?: WeatherForecastSample[];
+}
+
+export interface WeatherForecastSample {
+  time_offset: number;   // 相对当前时刻的秒数 (每 3 分钟一个样本)
+  weather: string;
+  track_temperature: number;
+  track_temperature_change: number;
+  air_temperature: number;
+  air_temperature_change: number;
+  rain_percentage: number;
 }
 
 export interface ParticipantData {
@@ -158,6 +169,22 @@ export interface RaceStrategy {
   }>;
 }
 
+export type PitCondition = 'green' | 'sc' | 'ds';
+
+export interface PitLossInfo {
+  loss_ms: number;
+}
+
+export interface PitLossState {
+  track_id: string | null;
+  condition: PitCondition;
+  losses: Record<PitCondition, PitLossInfo>;
+  prediction: {
+    current_position: number | null;
+    predicted: Partial<Record<PitCondition, number | null>>;
+  };
+}
+
 export interface TelemetryState {
   session: SessionData | null;
   participants: Record<number, ParticipantData>;
@@ -169,6 +196,7 @@ export interface TelemetryState {
   current_lap_sectors: [number, number, number] | null;  // Real-time sector times for current lap
   starting_grid: StartingGrid | null;
   race_strategy: RaceStrategy;
+  pit_loss: PitLossState | null;
   connected: boolean;
   last_update: string | null;
 }
