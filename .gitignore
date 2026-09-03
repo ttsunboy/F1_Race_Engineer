@@ -69,3 +69,9 @@ backend/data/
 
 # 进站损失分析脚本与中间数据 (仅本地, 不进版本库)
 backend/scripts/
+
+# runtime
+backend/.udp_config.json
+backend/package-lock.json
+backend/test_receiver.py
+logs/

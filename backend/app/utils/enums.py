@@ -1,6 +1,6 @@
 """F1 24 Telemetry Enum Mappings"""
 
-# Session Types
+# Session Types (Aligned with F1 24)
 SESSION_TYPES = {
     0: "Unknown",
     1: "Practice 1",
@@ -12,15 +12,10 @@ SESSION_TYPES = {
     7: "Qualifying 3",
     8: "Short Qualifying",
     9: "One-Shot Qualifying",
-    10: "Sprint Shootout 1",
-    11: "Sprint Shootout 2",
-    12: "Sprint Shootout 3",
-    13: "Short Sprint Shootout",
-    14: "One-Shot Sprint Shootout",
-    15: "Race",
-    16: "Race 2",
-    17: "Race 3",
-    18: "Time Trial"
+    10: "Race",
+    11: "Race 2",
+    12: "Race 3",
+    13: "Time Trial",
 }
 
 # Track IDs
@@ -45,7 +40,7 @@ TRACK_IDS = {
     17: "Austria",
     18: "Sochi",
     19: "Mexico",
-    20: "Azerbaijan",
+    20: "Baku",
     21: "Sakhir Short",
     22: "Silverstone Short",
     23: "Texas Short",
@@ -53,24 +48,36 @@ TRACK_IDS = {
     25: "Hanoi",
     26: "Zandvoort",
     27: "Imola",
-    28: "Portimão",
+    28: "Portimao",
     29: "Jeddah",
     30: "Miami",
     31: "Las Vegas",
     32: "Losail",
 }
 
-# Weather Conditions
+# Track lengths from in-game telemetry when available; otherwise temporary placeholders.
+# Used only as fallback when F1 World session metadata is zeroed.
+TRACK_LENGTHS = {
+    0: 5300,
+    2: 5451,
+    3: 5412,
+    6: 4361,
+    7: 5891,
+    10: 7004,
+    11: 5793,
+    13: 5807,
+    31: 6201,
+}
+
 WEATHER = {
     0: "Clear",
     1: "Light Cloud",
     2: "Overcast",
     3: "Light Rain",
     4: "Heavy Rain",
-    5: "Storm"
+    5: "Storm",
 }
 
-# Team IDs
 TEAMS = {
     0: "Mercedes",
     1: "Ferrari",
@@ -91,33 +98,29 @@ TEAMS = {
     91: "AlphaTauri 2020",
     92: "Haas 2020",
     93: "McLaren 2020",
-    94: "Alfa Romeo 2020"
+    94: "Alfa Romeo 2020",
 }
 
-# Pit Status
 PIT_STATUS = {
     0: "None",
     1: "Pitting",
-    2: "In Pit Area"
+    2: "In Pit Area",
 }
 
-# Sector
 SECTOR = {
     0: "Sector 1",
     1: "Sector 2",
-    2: "Sector 3"
+    2: "Sector 3",
 }
 
-# Driver Status
 DRIVER_STATUS = {
     0: "In Garage",
     1: "Flying Lap",
     2: "In Lap",
     3: "Out Lap",
-    4: "On Track"
+    4: "On Track",
 }
 
-# Result Status
 RESULT_STATUS = {
     0: "Invalid",
     1: "Inactive",
@@ -126,79 +129,42 @@ RESULT_STATUS = {
     4: "Did Not Finish",
     5: "Disqualified",
     6: "Not Classified",
-    7: "Retired"
+    7: "Retired",
 }
 
-# Tyre Compounds (Visual)
 TYRE_COMPOUNDS = {
-    0: "Soft",
-    1: "Medium",
-    2: "Hard",
-    3: "Inter",
-    4: "Wet",
-    7: "Inter",
-    8: "Wet",
-    9: "Dry",
-    10: "Wet",
-    11: "Super Soft",
-    12: "Soft",
-    13: "Medium",
-    14: "Hard",
-    15: "Wet",
-    16: "C5",
-    17: "C4",
-    18: "C3",
-    19: "C2",
-    20: "C1",
-    21: "C0"
+    16: "SOFT",
+    17: "MEDIUM",
+    18: "HARD",
+    7: "INTER",
+    8: "WET",
 }
 
-# DRS Status
 DRS_STATUS = {
-    0: "Not Available",
-    1: "Available",
-    -1: "Unknown"
+    0: "Off",
+    1: "On",
 }
 
-# DRS Allowed
 DRS_ALLOWED = {
     0: "Not Allowed",
     1: "Allowed",
-    -1: "Unknown"
 }
 
-# ERS Deploy Mode
 ERS_DEPLOY_MODE = {
     0: "None",
     1: "Medium",
     2: "Hotlap",
-    3: "Overtake"
+    3: "Overtake",
 }
 
-# Fuel Mix
 FUEL_MIX = {
     0: "Lean",
     1: "Standard",
     2: "Rich",
-    3: "Max"
+    3: "Max",
 }
 
 
-def format_enum(value, enum_dict):
-    """Format an enum value to readable text"""
-    if value is None:
-        return "Unknown"
-
-    # Handle string numbers
-    if isinstance(value, str):
-        try:
-            value = int(value)
-        except (ValueError, TypeError):
-            return value
-
-    # Handle enum objects with name attribute
-    if hasattr(value, 'name'):
-        return value.name
-
-    # Look up in dictionary
-    return enum_dict.get(value, str(value))
+def format_enum(value, enum_map):
+    """Safely map an enum numeric value to a human string."""
+    return enum_map.get(value, str(value) if value is not None else "Unknown")

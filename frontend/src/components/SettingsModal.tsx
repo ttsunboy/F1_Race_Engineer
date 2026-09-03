@@ -1,5 +1,5 @@
 /**
- * Settings modal - UDP listener configuration + theme toggle
+ * Settings modal - UDP listener configuration
  */
 import { useState, useEffect, useCallback } from 'react';
 import type { FormEvent } from 'react';
@@ -8,8 +8,6 @@ import { X, Save, Loader2 } from 'lucide-react';
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
-  darkMode: boolean;
-  onToggleDarkMode: () => void;
 }
 
 interface Feedback {
@@ -17,25 +15,35 @@ interface Feedback {
   message: string;
 }
 
-export function SettingsModal({ open, onClose, darkMode, onToggleDarkMode }: SettingsModalProps) {
+export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('20777');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
+  const [trackOverride, setTrackOverride] = useState('');
+  const [supportedTracks, setSupportedTracks] = useState<string[]>([]);
+
   const fetchConfig = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch('/api/config/udp');
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+      const [udpRes, trackRes] = await Promise.all([
+        fetch('/api/config/udp'),
+        fetch('/api/config/track')
+      ]);
+
+      if (udpRes.ok) {
+        const udpData = await udpRes.json();
+        setHost(udpData.udp_host === '0.0.0.0' ? '' : udpData.udp_host);
+        setPort(String(udpData.udp_port ?? 20777));
       }
-      const data = await res.json();
-      // "0.0.0.0" means all interfaces; show an empty field instead
-      setHost(data.udp_host === '0.0.0.0' ? '' : data.udp_host);
-      setPort(String(data.udp_port ?? 20777));
+      if (trackRes.ok) {
+        const trackData = await trackRes.json();
+        setTrackOverride(trackData.track_override || '');
+        setSupportedTracks(trackData.supported_tracks || []);
+      }
     } catch (e) {
       setFeedback({ type: 'error', message: `读取配置失败: ${(e as Error).message}` });
     } finally {
@@ -61,16 +69,21 @@ export function SettingsModal({ open, onClose, darkMode, onToggleDarkMode }: Set
 
     setSaving(true);
     try {
-      const res = await fetch('/api/config/udp', {
+      const udpRes = await fetch('/api/config/udp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ udp_host: host.trim(), udp_port: portNum }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.detail || `HTTP ${res.status}`);
+      const trackRes = await fetch('/api/config/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_override: trackOverride }),
+      });
+      const data = await udpRes.json().catch(() => ({}));
+      if (!udpRes.ok || !trackRes.ok) {
+        throw new Error(data.detail || '保存失败');
       }
-      setFeedback({ type: 'success', message: `已保存并重启监听: ${data.udp_host}:${data.udp_port}` });
+      setFeedback({ type: 'success', message: `已保存并重启监听: ${data.udp_host || '0.0.0.0'}:${data.udp_port}` });
     } catch (err) {
       setFeedback({ type: 'error', message: `保存失败: ${(err as Error).message}` });
     } finally {
@@ -123,6 +136,20 @@ export function SettingsModal({ open, onClose, darkMode, onToggleDarkMode }: Set
             />
           </div>
 
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">强制赛道覆盖 (F1 World 模式下需要)</label>
+            <select
+              value={trackOverride}
+              onChange={(e) => setTrackOverride(e.target.value)}
+              className="w-full px-3 py-2 bg-f1-darker border border-f1-gray rounded text-white focus:outline-none focus:border-race-red"
+            >
+              <option value="">-- 自动跟随遥测 (无覆盖) --</option>
+              {supportedTracks.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
           {feedback && (
             <div
               className={`text-sm px-3 py-2 rounded ${
@@ -133,14 +160,7 @@ export function SettingsModal({ open, onClose, darkMode, onToggleDarkMode }: Set
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-2 border-t border-f1-gray">
-            <button
-              type="button"
-              onClick={onToggleDarkMode}
-              className="text-sm text-gray-400 hover:text-white transition-colors"
-            >
-              深色模式: {darkMode ? '开' : '关'}
-            </button>
+          <div className="flex justify-end pt-2 border-t border-f1-gray">
             <button
               type="submit"
               disabled={saving || loading}

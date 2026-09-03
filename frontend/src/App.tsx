@@ -19,7 +19,6 @@ import { Settings, Maximize2, Minimize2, Trophy, Gauge } from 'lucide-react';
 
 function App() {
   const { isConnected } = useTelemetry();
-  const [darkMode, setDarkMode] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'history'>('dashboard');
@@ -69,7 +68,7 @@ function App() {
   };
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
+    <div>
       <div className="min-h-screen bg-f1-darker text-white">
         {/* Header */}
         <header className="bg-f1-dark border-b border-f1-gray">
@@ -126,34 +125,38 @@ function App() {
         </header>
 
         {/* Main Content */}
-        <main className="container mx-auto px-4 py-6 max-w-[2400px]">
+        <main className="container mx-auto px-4 py-4 max-w-[2400px]">
           {currentPage === 'dashboard' ? (
-            <div className="grid grid-cols-12 gap-4">
-              {/* Left Column - Session, Delta, and Strategy */}
-              <div className="col-span-12 lg:col-span-2 space-y-4">
+            <div className="grid grid-cols-14 gap-4">
+              {/* Left Column - Session & Delta */}
+              <div className="col-span-14 lg:col-span-2 space-y-4">
                 <SessionInfo />
                 <DeltaDisplay />
-                <RaceStrategy />
               </div>
 
-              {/* Center Column - Driver Panel, Tires, Fuel, Track */}
-              <div className="col-span-12 lg:col-span-4 space-y-4">
+              {/* Driver Column */}
+              <div className="col-span-14 lg:col-span-3 space-y-4">
                 <DriverPanel />
                 <div className="grid grid-cols-2 gap-4">
                   <TyreData />
                   <FuelERS />
                 </div>
-                <TrackMap />
               </div>
 
-              {/* Center-Right Column - Lap History */}
-              <div className="col-span-12 lg:col-span-2">
+              {/* Strategy Column */}
+              <div className="col-span-14 lg:col-span-2">
+                <RaceStrategy />
+              </div>
+
+              {/* Lap History Column */}
+              <div className="col-span-14 lg:col-span-2">
                 <LapHistory />
               </div>
 
-              {/* Right Column - Timing Tower */}
-              <div className="col-span-12 lg:col-span-4">
+              {/* Right Column - Timing Tower and Track Map */}
+              <div className="col-span-14 lg:col-span-5 space-y-4">
                 <TimingTower />
+                <TrackMap />
               </div>
             </div>
           ) : (
@@ -170,8 +173,6 @@ function App() {
         <SettingsModal
           open={showSettings}
           onClose={() => setShowSettings(false)}
-          darkMode={darkMode}
-          onToggleDarkMode={() => setDarkMode(!darkMode)}
         />
 
         {/* Race Finished Notification */}

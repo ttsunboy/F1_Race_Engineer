@@ -18,6 +18,7 @@ class PacketType(IntEnum):
     SESSION_HISTORY = 11
     TYRE_SETS = 12
     MOTION_EX = 13
+    TIME_TRIAL = 14
 
 
 class SessionType(IntEnum):

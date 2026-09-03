@@ -1,7 +1,7 @@
 """F1 24 UDP packet data structures"""
 import struct
 from dataclasses import dataclass
-from typing import List
+from typing import List, Any
 from .packet_types import *
 
 
@@ -156,7 +156,9 @@ class LapData:
     sector2_time_in_ms: int
     sector2_time_minutes: int
     delta_to_car_in_front_in_ms: int
+    delta_to_car_in_front_minutes: int
     delta_to_race_leader_in_ms: int
+    delta_to_race_leader_minutes: int
     lap_distance: float
     total_distance: float
     safety_car_delta: float
@@ -178,6 +180,8 @@ class LapData:
     pit_lane_time_in_lane_in_ms: int
     pit_stop_timer_in_ms: int
     pit_stop_should_serve_pen: bool
+    speed_trap_fastest_speed: float
+    speed_trap_fastest_lap: int
 
 
 @dataclass
@@ -493,3 +497,82 @@ class PacketTyreSetsData:
     car_idx: int
     tyre_set_data: List[TyreSetData]  # 20 sets
     fitted_idx: int
+
+@dataclass
+class CarSetupData:
+    """Car setup data for a single car"""
+    front_wing: int
+    rear_wing: int
+    on_throttle: int
+    off_throttle: int
+    front_camber: float
+    rear_camber: float
+    front_toe: float
+    rear_toe: float
+    front_suspension: int
+    rear_suspension: int
+    front_anti_roll_bar: int
+    rear_anti_roll_bar: int
+    front_suspension_height: int
+    rear_suspension_height: int
+    brake_pressure: int
+    brake_bias: int
+    engine_braking: int
+    rear_left_tyre_pressure: float
+    rear_right_tyre_pressure: float
+    front_left_tyre_pressure: float
+    front_right_tyre_pressure: float
+    ballast: int
+    fuel_load: float
+
+@dataclass
+class PacketCarSetupData:
+    """Car setup packet"""
+    header: PacketHeader
+    car_setups: List[CarSetupData]  # 22 cars
+    next_front_wing_value: float
+
+@dataclass
+class LobbyInfoData:
+    """Lobby info for a single player"""
+    ai_controlled: bool
+    team_id: int
+    nationality: int
+    platform: int
+    name: str  # 48 chars
+    car_number: int
+    your_telemetry: bool
+    show_online_names: bool
+    f1world_tech_level: int
+    ready_status: int
+
+@dataclass
+class PacketLobbyInfoData:
+    """Lobby info packet"""
+    header: PacketHeader
+    num_players: int
+    lobby_players: List[LobbyInfoData]  # 22 players
+
+@dataclass
+class TimeTrialDataSet:
+    """Time trial data set"""
+    car_idx: int
+    team_id: int
+    lap_time_in_ms: int
+    sector1_time_in_ms: int
+    sector2_time_in_ms: int
+    sector3_time_in_ms: int
+    traction_control: int
+    gearbox_assist: int
+    anti_lock_brakes: int
+    equal_car_performance: int
+    custom_setup: int
+    valid: int
+
+@dataclass
+class PacketTimeTrialData:
+    """Time trial packet"""
+    header: PacketHeader
+    player_session_best_data_set: TimeTrialDataSet
+    personal_best_data_set: TimeTrialDataSet
+    rival_data_set: TimeTrialDataSet

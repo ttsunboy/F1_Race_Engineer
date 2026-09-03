@@ -71,6 +71,7 @@ echo.
 echo 3. Configure F1 24:
 echo    - Go to Settings ^> Telemetry Settings
 echo    - Enable UDP Telemetry on port 20777
+echo    - Set UDP Format to 2024
 echo    - Set Send Rate to 60Hz
 echo.
 echo 4. Open your browser:

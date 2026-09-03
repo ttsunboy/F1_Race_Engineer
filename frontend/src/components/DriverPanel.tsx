@@ -18,7 +18,7 @@ export const DriverPanel: React.FC = () => {
   if (!session) {
     return (
       <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
-        <h2 className="text-xl font-bold text-white mb-4">Driver Telemetry</h2>
+        <h2 className="text-lg font-bold text-white mb-4">Driver Telemetry</h2>
         <p className="text-gray-400 text-center py-8">Waiting for session data...</p>
       </div>
     );
@@ -27,7 +27,7 @@ export const DriverPanel: React.FC = () => {
   if (playerCarIndex === null) {
     return (
       <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
-        <h2 className="text-xl font-bold text-white mb-4">Driver Telemetry</h2>
+        <h2 className="text-lg font-bold text-white mb-4">Driver Telemetry</h2>
         <p className="text-gray-400 text-center py-8">Detecting player car...</p>
       </div>
     );
@@ -39,7 +39,7 @@ export const DriverPanel: React.FC = () => {
   if (!playerCar) {
     return (
       <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
-        <h2 className="text-xl font-bold text-white mb-4">Driver Telemetry</h2>
+        <h2 className="text-lg font-bold text-white mb-4">Driver Telemetry</h2>
         <p className="text-gray-400 text-center py-8">No player car data available</p>
       </div>
     );
@@ -139,18 +139,18 @@ export const DriverPanel: React.FC = () => {
   const liveDelta = getLiveDelta();
 
   return (
-    <div className="bg-f1-dark rounded-lg p-6 shadow-lg">
+    <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-white">
+        <h2 className="text-lg font-bold text-white">
           {playerInfo?.name || 'Driver'} - P{playerCar.position || '-'}
         </h2>
-        <div className="text-sm text-gray-400">
+        <div className="text-xs text-gray-400">
           Lap {playerCar.current_lap || 0}
         </div>
       </div>
 
       {/* Current Lap Time and Sector */}
-      <div className="mb-6 grid grid-cols-2 gap-4">
+      <div className="mb-4 grid grid-cols-2 gap-4">
         <div className="bg-f1-darker rounded-lg p-3">
           <div className="text-xs text-gray-400 mb-1">CURRENT LAP</div>
           <div className="text-xl font-mono font-bold text-race-green">
@@ -167,7 +167,7 @@ export const DriverPanel: React.FC = () => {
         </div>
         <div className="bg-f1-darker rounded-lg p-3">
           <div className="text-xs text-gray-400 mb-1">CURRENT SECTOR</div>
-          <div className="text-xl font-bold text-white mb-2">
+          <div className="text-lg font-bold text-white mb-2">
             S{currentSector}
           </div>
           {/* Show sector times with live deltas */}
@@ -216,14 +216,14 @@ export const DriverPanel: React.FC = () => {
             label="SPEED"
             unit="km/h"
             color="#00D656"
-            size={160}
+            size={110}
           />
           <Gauge
             value={playerCar.rpm || 0}
             max={playerCar.max_rpm || 15000}
             label="RPM"
             color="#FF3838"
-            size={160}
+            size={110}
           />
         </div>
 
@@ -235,7 +235,7 @@ export const DriverPanel: React.FC = () => {
             animate={{ scale: 1 }}
             className="bg-f1-darker rounded-lg p-6 text-center min-w-[120px]"
           >
-            <div className="text-sm text-gray-400 mb-2">GEAR</div>
+            <div className="text-xs text-gray-400 mb-2">GEAR</div>
             <div className="text-6xl font-bold text-white">
               {playerCar.gear === -1 ? 'R' : playerCar.gear === 0 ? 'N' : playerCar.gear}
             </div>

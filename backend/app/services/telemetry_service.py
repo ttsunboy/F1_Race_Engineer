@@ -1,5 +1,6 @@
 """Telemetry service - manages telemetry state and broadcasting"""
 import asyncio
+import os
 from typing import Dict, List, Set, Optional
 from datetime import datetime
 import json
@@ -25,6 +26,7 @@ class TelemetryService:
     """Manages telemetry data and broadcasts to connected clients"""
 
     def __init__(self):
+        self._track_override = ""
         self.current_state = {
             "session": {},
             "cars": {},
@@ -55,6 +57,32 @@ class TelemetryService:
         self.pit_loss_service = PitLossService()  # 内置固定进站损失表 (按站×条件)
         self._last_session_uid = None  # Detect new race via session_uid change
         self._pit_condition = "green"  # Current track condition (green/sc/ds)
+        self._lap_history_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'lap_history.json')
+        self._load_lap_history()
+
+    def _load_lap_history(self):
+        try:
+            if os.path.exists(self._lap_history_file):
+                with open(self._lap_history_file, 'r', encoding='utf-8') as f:
+                    self.current_state['lap_history'] = json.load(f)
+        except Exception:
+            self.current_state['lap_history'] = {}
+
+    def _save_lap_history(self):
+        try:
+            os.makedirs(os.path.dirname(self._lap_history_file), exist_ok=True)
+            with open(self._lap_history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.current_state['lap_history'], f)
+        except Exception:
+            pass
+
+    async def clear_lap_history(self):
+        self.current_state['lap_history'] = {}
+        self.current_state['best_sectors'] = {}
+        self.current_state['current_lap_sectors'] = {}
+        self._save_lap_history()
+        await self._broadcast_update('lap_history', {})
+        await self._broadcast_update('best_sectors', {})
 
     def add_websocket_client(self, websocket):
         """Add a WebSocket client"""
@@ -95,6 +123,12 @@ class TelemetryService:
         except Exception as e:
             print(f"Error handling packet: {e}")
 
+    def get_track_override(self) -> str:
+        return self._track_override
+
+    def set_track_override(self, track_name: str):
+        self._track_override = track_name
+
     async def _handle_session_packet(self, packet):
         """Handle session data packet"""
         header = get_attr(packet, 'header', 'm_header')
@@ -110,18 +144,42 @@ class TelemetryService:
             await self._broadcast_update("session_reset", {"reason": "new_session_uid"})
         self._last_session_uid = new_uid
 
-        session_type = format_enum(get_attr(packet, 'session_type', 'sessionType', 'm_sessionType'), SESSION_TYPES)
+        raw_session_type = get_attr(packet, 'session_type', 'sessionType', 'm_sessionType')
+        raw_track_id = get_attr(packet, 'track_id', 'trackId', 'm_trackId')
+        total_laps = get_attr(packet, 'total_laps', 'totalLaps', 'm_totalLaps', default=0)
+        track_length = get_attr(packet, 'track_length', 'trackLength', 'm_trackLength', default=0)
+
+        metadata_zeroed = (raw_session_type == 0 and raw_track_id == 0 and total_laps == 0 and track_length == 0)
+
+        session_type = format_enum(raw_session_type, SESSION_TYPES)
+        track_id = format_enum(raw_track_id, TRACK_IDS)
+        
+        if metadata_zeroed:
+            session_type = "UNKNOWN"
+            if self._track_override:
+                track_id = self._track_override
+                from app.utils.enums import TRACK_LENGTHS, TRACK_IDS as ENUM_TRACK_IDS
+                # Reverse lookup the length from dict if available
+                numeric_track_id = None
+                for k, v in ENUM_TRACK_IDS.items():
+                    if v == self._track_override:
+                        numeric_track_id = k
+                        break
+                if numeric_track_id is not None and numeric_track_id in TRACK_LENGTHS:
+                    track_length = TRACK_LENGTHS[numeric_track_id]
+            else:
+                track_id = "Unknown Track"
 
         self.current_state["session"] = {
             "session_uid": get_attr(header, 'session_uid', 'sessionUID', 'm_sessionUID', default=0),
             "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
             "session_type": session_type,
-            "track_id": format_enum(get_attr(packet, 'track_id', 'trackId', 'm_trackId'), TRACK_IDS),
+            "track_id": track_id,
             "weather": format_enum(get_attr(packet, 'weather', 'm_weather'), WEATHER),
             "track_temperature": get_attr(packet, 'track_temperature', 'trackTemperature', 'm_trackTemperature', default=0),
             "air_temperature": get_attr(packet, 'air_temperature', 'airTemperature', 'm_airTemperature', default=0),
-            "total_laps": get_attr(packet, 'total_laps', 'totalLaps', 'm_totalLaps', default=0),
-            "track_length": get_attr(packet, 'track_length', 'trackLength', 'm_trackLength', default=0),
+            "total_laps": total_laps,
+            "track_length": track_length,
             "session_time_left": get_attr(packet, 'session_time_left', 'sessionTimeLeft', 'm_sessionTimeLeft', default=0),
             "session_duration": get_attr(packet, 'session_duration', 'sessionDuration', 'm_sessionDuration', default=0),
             "pit_speed_limit": get_attr(packet, 'pit_speed_limit', 'pitSpeedLimit', 'm_pitSpeedLimit', default=0),
@@ -146,7 +204,7 @@ class TelemetryService:
 
     @staticmethod
     def _extract_forecast(packet):
-        """WeatherForecastSample 列表 -> 可序列化 dict 列表 (游戏每 3 分钟一个样本)."""
+        """WeatherForecastSample 列表 -> 可序列化 dict 列表 (time_offset 单位是分钟，且只使用有效样本)."""
         raw = get_attr(packet, 'weather_forecast_samples', 'weatherForecastSamples',
                        'm_weatherForecastSamples', default=[])
         samples = []
@@ -169,6 +227,7 @@ class TelemetryService:
         self.current_state["lap_history"] = {}
         self.current_state["best_sectors"] = {}
         self.current_state["current_lap_sectors"] = {}
+        self._save_lap_history()
         self.current_state["starting_grid"] = {}
         self.current_state["pit_loss"] = None
         self.sector_times_cache = {}
@@ -375,6 +434,7 @@ class TelemetryService:
                             "tire_compound": car_data.get("tyre_visual_compound", "Unknown"),
                             "tire_age": car_data.get("tyre_age_laps", 0)
                         })
+                        self._save_lap_history()
 
                         # Update best sectors
                         if idx not in self.current_state["best_sectors"]:
@@ -811,3 +871,5 @@ class TelemetryService:
         self.race_recap_service.reset_session()
         self.last_positions = {}
         print("🔄 Race session reset - ready for new race")
+
+

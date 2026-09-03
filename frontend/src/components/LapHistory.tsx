@@ -4,16 +4,31 @@
 import React from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { formatLapTime, getTyreCompoundColor } from '@/utils/formatting';
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { TrendingDown, TrendingUp, Trash2 } from 'lucide-react';
 
 export const LapHistory: React.FC = () => {
   const lapHistory = useTelemetryStore((state) => state.lap_history);
   const bestSectors = useTelemetryStore((state) => state.best_sectors);
+  const [clearing, setClearing] = React.useState(false);
+
+  const clearLapHistory = async () => {
+    try {
+      setClearing(true);
+      await fetch('/api/lap-history/clear', { method: 'POST' });
+    } finally {
+      setClearing(false);
+    }
+  };
 
   if (lapHistory.length === 0) {
     return (
       <div className="bg-f1-dark rounded-lg p-4 shadow-lg h-full">
-        <h2 className="text-lg font-bold text-white mb-4">Lap History</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-white">Lap History</h2>
+          <button onClick={clearLapHistory} disabled={clearing} className="text-gray-400 hover:text-white disabled:opacity-50">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
         <p className="text-gray-400 text-center py-8">Complete your first lap to see history</p>
       </div>
     );
@@ -37,7 +52,12 @@ export const LapHistory: React.FC = () => {
 
   return (
     <div className="bg-f1-dark rounded-lg p-4 shadow-lg h-full flex flex-col">
-      <h2 className="text-lg font-bold text-white mb-4">Lap History</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold text-white">Lap History</h2>
+        <button onClick={clearLapHistory} disabled={clearing} className="text-gray-400 hover:text-white disabled:opacity-50">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-2">

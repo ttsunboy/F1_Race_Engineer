@@ -1,51 +1,44 @@
-"""UDP telemetry receiver"""
 import asyncio
 import socket
-from typing import Callable, Optional
+import logging
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, List
 from .parser import F1TelemetryParser
+from .packet_types import PacketType
+from .lograte import log_limited
+
+logger = logging.getLogger(__name__)
 
 
 class UDPTelemetryReceiver:
-    """Receives and processes F1 24 UDP telemetry packets"""
+    """UDP telemetry receiver"""
 
     def __init__(self, host: str = "", port: int = 20777):
-        """
-        Initialize UDP receiver
-
-        Args:
-            host: Host IP to bind to (empty string for all interfaces)
-            port: UDP port to listen on (default: 20777)
-        """
-        # Use 0.0.0.0 for all interfaces if host is empty
-        self.host = host if host else "0.0.0.0"
+        self.host = host
         self.port = port
+        self.sock = None
         self.running = False
-        self.sock: Optional[socket.socket] = None
-        self._receive_task: Optional[asyncio.Task] = None
-        self.executor: Optional[ThreadPoolExecutor] = None
-        self.packet_callbacks = []
+        self.packet_callbacks: List[Callable] = []
+        self._receive_task = None
+        
+        # Track statistics
         self.stats = {
             "packets_received": 0,
             "packets_parsed": 0,
             "parse_errors": 0,
+            "errors_by_type": {},
             "started_at": None
         }
 
     def set_config(self, host: str = "", port: int = 20777):
-        """Update listen address/port (takes effect on next start())."""
-        self.host = host if host else "0.0.0.0"
+        """Update connection configuration"""
+        self.host = host
         self.port = port
 
     def add_packet_callback(self, callback: Callable):
-        """
-        Add a callback function to be called when a packet is received
-
-        Args:
-            callback: Async function that takes (packet_type, packet_data)
-        """
-        self.packet_callbacks.append(callback)
+        """Register a callback for parsed packets"""
+        if callback not in self.packet_callbacks:
+            self.packet_callbacks.append(callback)
 
     def remove_packet_callback(self, callback: Callable):
         """Remove a packet callback"""
@@ -53,67 +46,69 @@ class UDPTelemetryReceiver:
             self.packet_callbacks.remove(callback)
 
     async def start(self):
-        """Start the UDP receiver"""
+        """Start listening for UDP packets"""
         if self.running:
             return
 
         try:
-            # Create UDP socket
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Use SO_RCVBUF to increase buffer size for high rate UDP if supported, omitting here for safe cross platform
             self.sock.bind((self.host, self.port))
             self.sock.setblocking(False)
-
+            
             self.running = True
             self.stats["started_at"] = datetime.now()
-            print(f"UDP receiver started on {self.host}:{self.port}")
-
-            # Start receiving loop
             self._receive_task = asyncio.create_task(self._receive_loop())
-
+            
+            logger.info(f"UDP receiver started on {self.host}:{self.port}")
+            
         except Exception as e:
-            print(f"Error starting UDP receiver: {e}")
+            self.running = False
+            logger.error(f"Error starting UDP receiver: {e}")
             raise
 
     async def stop(self):
-        """Stop the UDP receiver"""
+        """Stop listening for UDP packets"""
         self.running = False
-        task = self._receive_task
-        self._receive_task = None
-        if task is not None:
-            task.cancel()
+        
+        if self._receive_task:
+            self._receive_task.cancel()
             try:
-                await task
-            except (asyncio.CancelledError, Exception):
+                await self._receive_task
+            except asyncio.CancelledError:
                 pass
+            
         if self.sock:
-            try:
-                self.sock.close()
-            except Exception:
-                pass
+            self.sock.close()
             self.sock = None
-        print("UDP receiver stopped")
+            
+        logger.info("UDP receiver stopped")
 
     async def _receive_loop(self):
-        """Main receive loop - reads UDP datagrams and parses them"""
+        """Background task to receive UDP packets"""
         loop = asyncio.get_event_loop()
-
-        while self.running and self.sock:
+        
+        while self.running:
             try:
-                # Non-blocking read with a small timeout to keep loop responsive
-                data = await loop.sock_recv(self.sock, 2048)
-
-                if data:
-                    self.stats["packets_received"] += 1
-                    await self._process_packet(data)
-
+                # Use a large buffer to accommodate max packet size
+                recv_result = await loop.sock_recv(self.sock, 4096)
+                if isinstance(recv_result, tuple):
+                    data, addr = recv_result
+                else:
+                    data, addr = recv_result, None
+                self.stats["packets_received"] += 1
+                
+                # Dispatch parsing without waiting to maintain recv rate
+                asyncio.create_task(self._process_packet(data))
+                
             except asyncio.CancelledError:
                 break
             except BlockingIOError:
                 await asyncio.sleep(0.001)
             except Exception as e:
                 if self.running:
-                    print(f"Error receiving packet: {e}")
+                    logger.debug(f"Error receiving packet: {e}")
                 await asyncio.sleep(0.001)
 
     async def _process_packet(self, data: bytes):
@@ -123,6 +118,10 @@ class UDPTelemetryReceiver:
 
             if packet is None:
                 self.stats["parse_errors"] += 1
+                if len(data) >= 6:
+                    ptype = data[5]
+                    self.stats["errors_by_type"][ptype] = self.stats["errors_by_type"].get(ptype, 0) + 1
+                    log_limited(f"drop_{ptype}", f"Dropped unparseable packet type {ptype}")
                 return
 
             # Get packet ID from header
@@ -144,11 +143,11 @@ class UDPTelemetryReceiver:
                 try:
                     await callback(packet_type, packet)
                 except Exception as e:
-                    print(f"Error in packet callback: {e}")
+                    logger.debug(f"Error in packet callback: {e}")
 
         except Exception as e:
             self.stats["parse_errors"] += 1
-            print(f"Error processing packet: {e}")
+            logger.debug(f"Error processing packet: {e}")
 
     def get_stats(self) -> dict:
         """Get receiver statistics"""
@@ -158,4 +157,9 @@ class UDPTelemetryReceiver:
             stats["uptime_seconds"] = uptime
             if uptime > 0:
                 stats["packets_per_second"] = stats["packets_received"] / uptime
+        
+        # Serialize datetime
+        if stats["started_at"]:
+            stats["started_at"] = stats["started_at"].isoformat()
+            
         return stats

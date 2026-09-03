@@ -5,35 +5,31 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
 ## Features
 
 ### Real-Time Telemetry
-- Live UDP data capture from F1 24
+- Live UDP data capture from F1 24 (2024 format, port 20777 by default)
 - Real-time position, lap, and delta timing
 - Speed, gear, RPM, and input visualization
 - DRS, ERS, battery, and fuel monitoring
 - Comprehensive tire data (compound, temp, pressure, wear)
-- Weather and track conditions
+- Weather and track conditions (current + forecast timeline)
 - Car damage and component health
+- Safety car / VSC status indicator
 
 ### Dashboard Components
-- **Live Timing Tower**: All drivers, positions, tire choices, and intervals
-- **Track Map**: Real-time car positions with DRS zones and flags
+- **Live Timing Tower**: All drivers, positions, live sector times, tire choices, gaps and intervals
+- **Track Map**: Real circuit layouts with live car positions, team colors, player highlighted
 - **Driver Detail Panel**: Animated gauges for RPM, speed, inputs, gear, DRS
 - **Tire Heat Maps**: Temperature, pressure, and degradation visualization
 - **Fuel & ERS Display**: Levels, consumption, and efficiency tracking
-- **Delta Visualization**: Gain/loss over time with color indicators
+- **Delta Visualization**: Gain/loss vs leader and teammate
 - **Session Overview**: Lap times, sectors, weather, and pit strategy
+- **Pit Stop Prediction**: Estimated loss time per condition (green/SC/VSC) and predicted position drop
+- **Lap History**: Per-lap times and sector records, persists across restarts
+- **Race Recap / History**: Saved race results after each session
 
-### Recording & Playback
-- Record complete telemetry sessions
-- Replay mode with time scrubbing
-- Compare multiple laps and sessions
-- Export session data
-
-### Customization
-- Dark and light themes
-- Adjustable units (speed, temperature, pressure)
-- Toggle panel visibility
-- Streamer overlay mode
-- Configurable update rates
+### Configuration
+- UDP listener host/port configurable from the settings dialog and REST API
+- Track override for F1 World mode (which sends zeroed session metadata)
+- Pit loss time table per circuit (green/SC/VSC)
 
 ## Architecture
 
@@ -59,10 +55,10 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
 ## Tech Stack
 
 - **Backend**: Python 3.11+, FastAPI, WebSockets, asyncio
-- **Frontend**: React 18+, TypeScript, Recharts, D3.js, Canvas API
-- **Data Processing**: NumPy, Pandas (for session analysis)
+- **Frontend**: React 18+, TypeScript, Vite, Tailwind CSS
+- **Data Processing**: NumPy, Pandas (session analysis)
+- **Visualization**: Canvas API + inline SVG, Framer Motion
 - **Real-time Communication**: WebSocket
-- **Styling**: Tailwind CSS, Framer Motion
 
 ## Quick Start
 
@@ -75,7 +71,8 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
 
 1. **Clone the repository**
    ```bash
-   cd F1_Telemetry
+   git clone https://github.com/ttsunboy/F1_Race_Engineer.git
+   cd F1_Race_Engineer
    ```
 
 2. **Set up the backend**
@@ -87,10 +84,7 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
    ```
 
 3. **Set up the frontend**
-   ```bash
-   cd frontend
-   npm install
-   ```
+   Or use the provided scripts: `./setup.sh` (Linux/macOS) or `setup.bat` (Windows).
 
 ### Running the Application
 
@@ -105,9 +99,9 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
 2. **Start the frontend**
    ```bash
    cd frontend
-   npm start
+   npm run dev
    ```
-   The dashboard will open at `http://localhost:3000`
+   The dashboard will open at `http://localhost:3000` (proxies API to :8000)
 
 3. **Enable UDP telemetry in F1 24**
    - Go to Settings > Telemetry Settings
@@ -119,35 +113,36 @@ A full-featured, modern telemetry dashboard for F1 24 that captures and displays
 
 ## Configuration
 
-Edit `config/settings.json` to customize:
-- UDP port and IP address
-- Update rates and data smoothing
-- Default theme and units
-- Recording settings
+The UDP listener can be reconfigured at runtime from the **Settings** dialog in the app or via:
+- `GET/POST /api/config/udp` — UDP host/port (host empty = `0.0.0.0`)
+- `GET/POST /api/config/track` — track override for F1 World mode
+- `GET /api/pitloss` — pit loss table
+
+Config (UDP host/port + track override) is persisted to `backend/.udp_config.json`.
 
 ## Project Structure
 
 ```
-F1_Telemetry/
+F1_Race_Engineer/
 ├── backend/              # Python FastAPI backend
 │   ├── app/
-│   │   ├── main.py      # FastAPI application entry
-│   │   ├── udp/         # UDP receiver and parser
-│   │   ├── models/      # Data models
-│   │   ├── websocket/   # WebSocket handlers
-│   │   └── recording/   # Session recording
-│   ├── tests/
+│   │   ├── main.py      # FastAPI application entry + REST/WS endpoints
+│   │   ├── udp/         # UDP receiver and F1 24 parser
+│   │   ├── services/    # telemetry / pit loss / race recap
+│   │   ├── utils/       # F1 24 enums (tracks, session types, ...)
+│   │   └── config.py    # Settings
+│   ├── test_parser.py   # Parser regression tests
 │   └── requirements.txt
 ├── frontend/            # React TypeScript frontend
 │   ├── src/
 │   │   ├── components/  # Dashboard components
 │   │   ├── hooks/       # Custom React hooks
-│   │   ├── services/    # WebSocket and API services
-│   │   └── types/       # TypeScript types
+│   │   ├── services/    # WebSocket client
+│   │   ├── store/       # Zustand telemetry store
+│   │   ├── types/       # TypeScript types
+│   │   └── utils/       # formatting, track SVG map
 │   └── package.json
-├── data/                # Recorded sessions and data
-├── docs/                # Documentation
-└── config/              # Configuration files
+└── setup.sh / setup.bat / start.sh
 ```
 
 ## Development
@@ -167,32 +162,14 @@ npm run dev
 
 ### Testing
 ```bash
-# Backend tests
+# Backend parser tests
 cd backend
-pytest
+python3 test_parser.py
 
-# Frontend tests
-cd frontend
-npm test
-```
-
-## Deployment
-
-### Docker
-```bash
-docker-compose up
-```
-
-### Desktop App (Electron)
-```bash
+# Frontend build / type check
 cd frontend
 npm run build
-npm run electron-build
 ```
-
-## Contributing
-
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for development guidelines.
 
 ## License
 
@@ -201,4 +178,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - F1 24 UDP Specification by EA Sports / Codemasters
-- Inspired by professional F1 race engineering tools
+- Circuit outlines: [julesr0y/f1-circuits-svg](https://github.com/julesr0y/f1-circuits-svg) (CC-BY 4.0)
+- Pit lane loss data: F1 official Strategy Guide articles (2024)

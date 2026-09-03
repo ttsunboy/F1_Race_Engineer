@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
-import { formatTemperature } from '@/utils/formatting';
+import { formatTemperature, formatLapTime } from '@/utils/formatting';
 import { Cloud, CloudRain, Sun, Flag, Shield, AlertTriangle } from 'lucide-react';
 
 // 天气图标: 后端 weather 值含空格 ("Light Rain"), 归一化后再匹配
@@ -69,16 +69,37 @@ export const SessionInfo: React.FC = () => {
 
   const sessionDuration = session.session_duration || 0;
   const timeLeft = session.session_time_left || 0;
-  const elapsedTime = sessionDuration - timeLeft;
+  const canShowElapsed = sessionDuration > 0 && timeLeft >= 0 && timeLeft <= sessionDuration;
+  const elapsedTime = canShowElapsed ? Math.max(0, sessionDuration - timeLeft) : 0;
   const minutes = Math.floor(elapsedTime / 60);
   const seconds = elapsedTime % 60;
 
   const status = STATUS_META[session.safety_car_status] ?? STATUS_META[0];
 
-  // 预报样本: 第一个 time_offset=0 是当前时刻, 取后面 5 个 (每 3 分钟一个)
-  const forecast = (session.weather_forecast_samples ?? [])
-    .filter((f) => f.time_offset > 0)
-    .slice(0, 5);
+  const forecastSamples = session.weather_forecast_samples ?? [];
+  const dedupedForecast = Object.values(
+    forecastSamples.reduce((acc, f) => {
+      acc[f.time_offset] = f;
+      return acc;
+    }, {} as Record<number, (typeof forecastSamples)[number]>)
+  ).sort((a, b) => a.time_offset - b.time_offset);
+
+  const pickChanges = <T,>(items: typeof dedupedForecast, getter: (item: typeof dedupedForecast[number]) => T) => {
+    const picked: typeof dedupedForecast = [];
+    let prev = getter({ ...items[0] } as typeof items[number]);
+    for (const item of items) {
+      const cur = getter(item);
+      if (picked.length === 0 || cur !== prev) {
+        picked.push(item);
+        prev = cur;
+      }
+    }
+    return picked.filter((f) => f.time_offset > 0);
+  };
+
+  const weatherChanges = pickChanges(dedupedForecast, (f) => `${f.weather}:${f.rain_percentage}`);
+  const trackTempChanges = pickChanges(dedupedForecast, (f) => f.track_temperature);
+  const airTempChanges = pickChanges(dedupedForecast, (f) => f.air_temperature);
 
   return (
     <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
@@ -110,9 +131,9 @@ export const SessionInfo: React.FC = () => {
 
         {/* Elapsed time */}
         <div className="bg-f1-darker rounded-lg p-3">
-          <div className="text-xs text-gray-400 mb-1">ELAPSED TIME</div>
+          <div className="text-xs text-gray-400 mb-1">{canShowElapsed ? 'ELAPSED TIME' : 'SESSION TIME'}</div>
           <div className="text-2xl font-mono font-bold text-white">
-            {minutes}:{seconds.toString().padStart(2, '0')}
+            {canShowElapsed ? `${minutes}:${seconds.toString().padStart(2, '0')}` : formatLapTime((session.session_time || 0) * 1000)}
           </div>
         </div>
 
@@ -128,12 +149,12 @@ export const SessionInfo: React.FC = () => {
                   {session.weather?.replace('_', ' ') || 'Unknown'}
                 </span>
               </div>
-              {forecast.map((f) => (
+              {weatherChanges.map((f) => (
                 <div key={f.time_offset} className="flex items-center gap-1"
                      title={`${f.weather}${f.rain_percentage > 0 ? ` · 降雨 ${f.rain_percentage}%` : ''}`}>
                   <span className="text-gray-600">-</span>
                   {getWeatherIcon(f.weather, 'w-4 h-4')}
-                  <span className="text-[9px] text-gray-500">+{Math.round(f.time_offset / 60)}min</span>
+                  <span className="text-[9px] text-gray-500">+{Math.round(f.time_offset)}min</span>
                 </div>
               ))}
             </div>
@@ -146,10 +167,10 @@ export const SessionInfo: React.FC = () => {
               <span className="text-sm text-white font-mono">
                 {formatTemperature(session.track_temperature || 0)}
               </span>
-              {forecast.map((f) => (
+              {trackTempChanges.map((f) => (
                 <span key={f.time_offset} className="text-xs font-mono text-gray-300">
                   - {formatTemperature(f.track_temperature)}
-                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset / 60)}min</span>
+                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset)}min</span>
                 </span>
               ))}
             </div>
@@ -162,10 +183,10 @@ export const SessionInfo: React.FC = () => {
               <span className="text-sm text-white font-mono">
                 {formatTemperature(session.air_temperature || 0)}
               </span>
-              {forecast.map((f) => (
+              {airTempChanges.map((f) => (
                 <span key={f.time_offset} className="text-xs font-mono text-gray-300">
                   - {formatTemperature(f.air_temperature)}
-                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset / 60)}min</span>
+                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset)}min</span>
                 </span>
               ))}
             </div>

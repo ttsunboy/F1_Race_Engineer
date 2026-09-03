@@ -1,6 +1,3 @@
-/**
- * Timing Tower Component - Live timing and standings
- */
 import React from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { formatLapTime, getTyreCompoundColor, getTyreCompoundShort } from '@/utils/formatting';
@@ -9,6 +6,7 @@ import { motion } from 'framer-motion';
 export const TimingTower: React.FC = () => {
   const timing = useTelemetryStore((state) => state.timing);
   const cars = useTelemetryStore((state) => state.cars);
+  const playerCarIndex = useTelemetryStore((state) => state.playerCarIndex);
 
   if (timing.length === 0) {
     return (
@@ -44,6 +42,16 @@ export const TimingTower: React.FC = () => {
           {timing.map((entry, index) => {
             const car = cars[entry.car_index];
             const tyreColor = getTyreCompoundColor(car?.tyre_visual_compound);
+            const isPlayer = playerCarIndex !== null && entry.car_index === playerCarIndex;
+
+            // Sector display data from car telemetry
+            const s1 = car?.sector1_time_ms ? (car.sector1_time_ms / 1000).toFixed(1) : '-';
+            const s2 = car?.sector2_time_ms ? (car.sector2_time_ms / 1000).toFixed(1) : '-';
+            const s3 = car?.last_lap_time_ms && car?.sector2_time_ms
+              ? ((car.last_lap_time_ms - car.sector2_time_ms) / 1000).toFixed(1)
+              : '-';
+            // Current sector as index: S1=0, S2=1, S3=2
+            const currentS = car?.sector === 'S1' ? 0 : car?.sector === 'S2' ? 1 : car?.sector === 'S3' ? 2 : -1;
 
             return (
               <motion.div
@@ -116,8 +124,22 @@ export const TimingTower: React.FC = () => {
 
                 {/* Pit stops */}
                 <div className="flex items-center justify-center text-gray-400 text-xs">
-                  {entry.pit_stops}
+                  {entry.pit_stops > 0 ? entry.pit_stops : '-'}
                 </div>
+
+                {/* S1 S2 S3 */}
+                <div className="text-[10px] flex justify-between tracking-tighter text-right font-mono pr-2 h-full items-center">
+                   <div className={currentS === 0 ? (isPlayer ? 'text-white font-bold':'text-yellow-400 font-bold') : 'text-gray-400'}>
+                     {currentS === 0 ? s1 : s1}
+                   </div>
+                   <div className={currentS === 1 ? (isPlayer ? 'text-white font-bold':'text-yellow-400 font-bold') : 'text-gray-400'}>
+                     {currentS === 1 ? s2 : s2}
+                   </div>
+                   <div className={currentS === 2 ? (isPlayer ? 'text-white font-bold':'text-yellow-400 font-bold') : 'text-gray-400'}>
+                     {s3}
+                   </div>
+                </div>
+
               </motion.div>
             );
           })}

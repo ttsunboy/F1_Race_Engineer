@@ -104,6 +104,7 @@ export const TrackMap: React.FC = () => {
       const progress = ((lapDistance % denom) + denom) % denom;
       const fraction = trackLength > 0 ? progress / denom : 0;
       const pt = path.getPointAtLength(fraction * totalLength);
+
       dots.push({
         carIdx,
         x: pt.x,
