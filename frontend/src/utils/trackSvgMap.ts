@@ -72,8 +72,13 @@ export function resolveTrackSvg(
     if (/^\d+$/.test(trimmed)) {
       key = TRACK_NAME_BY_VALUE[parseInt(trimmed, 10)];
     } else {
-      // Strip qualifiers like "Sakhir (Bahrain)" -> "SAKHIR"
-      key = trimmed.toUpperCase().replace(/\s*\(.*\)\s*$/, '');
+      // Strip qualifiers like "Sakhir (Bahrain)" -> "SAKHIR", and
+      // normalize display names like "Abu Dhabi" -> "ABU_DHABI" or
+      // "Paul Ricard" -> "PAUL_RICARD" to enum-style keys.
+      key = trimmed
+        .toUpperCase()
+        .replace(/\s*\(.*\)\s*$/, '')
+        .replace(/[\s-]+/g, '_');
     }
   }
 

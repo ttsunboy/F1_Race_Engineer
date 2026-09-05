@@ -15,10 +15,12 @@ export interface SessionData {
   session_time_left: number;
   session_duration: number;
   pit_speed_limit: number;
+  marshal_zones?: Array<{ zone_start: number; zone_flag: number }>;
   safety_car_status: number;
   is_spectating: boolean;
   num_marshal_zones: number;
   forecast_accuracy: number;
+  time_of_day?: number;   // 当天经过的毫秒 (游戏内时间, 用于昼夜判断)
   weather_forecast_samples?: WeatherForecastSample[];
 }
 
@@ -34,6 +36,7 @@ export interface WeatherForecastSample {
 
 export interface ParticipantData {
   name: string;
+  driver_id?: number;
   team_id: string;
   race_number: number;
   nationality: number;
@@ -79,9 +82,12 @@ export interface CarData {
   fuel_in_tank?: number;
   fuel_capacity?: number;
   fuel_remaining_laps?: number;
+  fuel_last_used?: number; // actual fuel burned last completed lap (kg), settled at lap line
+  fuel_est_per_lap?: number; // game-estimated usage per lap (kg) at settlement time
   fuel_mix?: number;
   front_brake_bias?: number;
   drs_allowed?: string;
+  drs_activation_distance?: number;
   tyre_compound?: string;
   tyre_visual_compound?: string;
   tyre_age_laps?: number;
@@ -185,6 +191,12 @@ export interface PitLossState {
   };
 }
 
+export interface RaceEventData {
+  code: string;
+  details: Record<string, unknown> | number | null;
+  session_time: number;
+}
+
 export interface TelemetryState {
   session: SessionData | null;
   participants: Record<number, ParticipantData>;
@@ -197,8 +209,10 @@ export interface TelemetryState {
   starting_grid: StartingGrid | null;
   race_strategy: RaceStrategy;
   pit_loss: PitLossState | null;
+  race_events: RaceEventData[];
   connected: boolean;
   last_update: string | null;
+  highlighted_car_index: number | null;
 }
 
 export interface WebSocketMessage {

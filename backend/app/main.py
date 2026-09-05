@@ -49,7 +49,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -174,6 +174,16 @@ async def get_pit_loss():
 @app.get("/api/session")
 async def get_session():
     return telemetry_service.get_current_state().get("session", {})
+
+
+@app.post("/api/track-calibration/start")
+async def start_track_calibration():
+    return telemetry_service.start_track_calibration()
+
+
+@app.post("/api/track-calibration/stop")
+async def stop_track_calibration():
+    return telemetry_service.stop_track_calibration()
 
 
 @app.get("/api/timing")

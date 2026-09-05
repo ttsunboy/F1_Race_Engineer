@@ -10,6 +10,7 @@ import { FuelERS } from '@/components/FuelERS';
 import { TrackMap } from '@/components/TrackMap';
 import { SessionInfo } from '@/components/SessionInfo';
 import { DeltaDisplay } from '@/components/DeltaDisplay';
+import { EventTimeline } from '@/components/EventTimeline';
 import { LapHistory } from '@/components/LapHistory';
 import { RaceStrategy } from '@/components/RaceStrategy';
 import { RaceHistory } from '@/components/RaceHistory';
@@ -19,12 +20,31 @@ import { Settings, Maximize2, Minimize2, Trophy, Gauge } from 'lucide-react';
 
 function App() {
   const { isConnected } = useTelemetry();
+  const [pageScale, setPageScale] = useState(1);
   const [fullscreen, setFullscreen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'history'>('dashboard');
   const [selectedRaceId, setSelectedRaceId] = useState<string | null>(null);
   const [showRaceFinishedModal, setShowRaceFinishedModal] = useState(false);
   const [raceFinishedId, setRaceFinishedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updatePageScale = () => {
+      const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const widthScale = viewportWidth / 2560;
+      const heightScale = viewportHeight / 1260;
+      setPageScale(Math.min(widthScale, heightScale));
+    };
+
+    updatePageScale();
+    window.addEventListener('resize', updatePageScale);
+    window.visualViewport?.addEventListener('resize', updatePageScale);
+    return () => {
+      window.removeEventListener('resize', updatePageScale);
+      window.visualViewport?.removeEventListener('resize', updatePageScale);
+    };
+  }, []);
 
   // Listen for race finished event
   useEffect(() => {
@@ -69,7 +89,15 @@ function App() {
 
   return (
     <div>
-      <div className="min-h-screen bg-f1-darker text-white">
+      <div
+        className="app-shell min-h-screen bg-f1-darker text-white flex flex-col h-screen overflow-hidden"
+        style={{
+          zoom: pageScale,
+          width: `${100 / pageScale}vw`,
+          height: `${100 / pageScale}vh`,
+          minHeight: `${100 / pageScale}vh`,
+        }}
+      >
         {/* Header */}
         <header className="bg-f1-dark border-b border-f1-gray">
           <div className="container mx-auto px-4 py-4">
@@ -125,38 +153,47 @@ function App() {
         </header>
 
         {/* Main Content */}
-        <main className="container mx-auto px-4 py-4 max-w-[2400px]">
+        <main className="container mx-auto min-h-0 flex-1 overflow-hidden px-4 py-4 max-w-[2400px]">
           {currentPage === 'dashboard' ? (
-            <div className="grid grid-cols-14 gap-4">
+            <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,14fr)_minmax(0,28fr)_minmax(0,14fr)_minmax(0,14fr)_minmax(0,30fr)]">
               {/* Left Column - Session & Delta */}
-              <div className="col-span-14 lg:col-span-2 space-y-4">
+              <div className="flex h-full min-h-0 flex-col gap-4">
                 <SessionInfo />
                 <DeltaDisplay />
+                <EventTimeline />
               </div>
 
               {/* Driver Column */}
-              <div className="col-span-14 lg:col-span-3 space-y-4">
+              <div className="flex h-full flex-col gap-4">
                 <DriverPanel />
-                <div className="grid grid-cols-2 gap-4">
-                  <TyreData />
-                  <FuelERS />
+                <div className="grid min-h-0 flex-1 grid-cols-2 items-stretch gap-4">
+                  <div className="dashboard-card-fill h-full">
+                    <TyreData />
+                  </div>
+                  <div className="dashboard-card-fill h-full">
+                    <FuelERS />
+                  </div>
                 </div>
               </div>
 
               {/* Strategy Column */}
-              <div className="col-span-14 lg:col-span-2">
+              <div className="h-full">
                 <RaceStrategy />
               </div>
 
               {/* Lap History Column */}
-              <div className="col-span-14 lg:col-span-2">
+              <div className="h-full">
                 <LapHistory />
               </div>
 
               {/* Right Column - Timing Tower and Track Map */}
-              <div className="col-span-14 lg:col-span-5 space-y-4">
-                <TimingTower />
-                <TrackMap />
+              <div className="flex h-full min-h-0 flex-col gap-4">
+                <div className="min-h-0 flex-1">
+                  <TimingTower />
+                </div>
+                <div className="min-h-0 flex-none">
+                  <TrackMap />
+                </div>
               </div>
             </div>
           ) : (
@@ -202,15 +239,6 @@ function App() {
           </div>
         )}
 
-
-        {/* Footer */}
-        <footer className="bg-f1-dark border-t border-f1-gray mt-8">
-          <div className="container mx-auto px-4 py-4">
-            <div className="text-center text-sm text-gray-400">
-              F1 24 Telemetry Dashboard v1.0.0 | Real-time race engineering data
-            </div>
-          </div>
-        </footer>
       </div>
     </div>
   );

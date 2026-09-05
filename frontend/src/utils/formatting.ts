@@ -6,7 +6,7 @@
  * Format milliseconds to lap time string (MM:SS.mmm)
  */
 export const formatLapTime = (ms: number | undefined): string => {
-  if (ms === undefined || ms === 0) return '--:--.---';
+  if (ms === undefined || ms === 0) return '-:--.---';
 
   const totalSeconds = ms / 1000;
   const minutes = Math.floor(totalSeconds / 60);
@@ -158,14 +158,19 @@ export const getTyreCompoundColor = (compound: string | undefined): string => {
 /**
  * Get color for DRS status
  */
-export const getDRSColor = (drs: string | undefined): string => {
+export const getDRSColor = (drs: string | undefined, drsAllowed?: string): string => {
+  if (drs?.toUpperCase() === 'ON' || drs?.toUpperCase() === 'ACTIVE') {
+    return '#00D656'; // Green
+  }
+  if (drsAllowed?.toUpperCase() === 'ALLOWED') {
+    return '#FFD700'; // Yellow
+  }
   if (!drs) return '#888888';
 
   switch (drs.toUpperCase()) {
-    case 'ACTIVE':
+    case 'ON':
       return '#00D656'; // Green
-    case 'ALLOWED':
-      return '#FFD700'; // Yellow
+    case 'OFF':
     case 'NOT_ALLOWED':
     case 'UNKNOWN':
       return '#888888'; // Gray

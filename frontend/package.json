@@ -4,19 +4,22 @@
   "private": true,
   "description": "F1 24 Telemetry Dashboard - Real-time race engineering console",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "set ESBUILD_BINARY_PATH=node_modules\\.esbuild-bin\\esbuild.exe&& vite",
+    "build": "set ESBUILD_BINARY_PATH=node_modules\\.esbuild-bin\\esbuild.exe&& tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@esbuild/win32-x64": "^0.21.5",
+    "clsx": "^2.1.0",
+    "esbuild": "^0.21.5",
+    "framer-motion": "^10.18.0",
+    "lucide-react": "^0.303.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-icons": "^5.7.0",
     "recharts": "^2.10.3",
-    "framer-motion": "^10.18.0",
-    "zustand": "^4.4.7",
-    "clsx": "^2.1.0",
-    "lucide-react": "^0.303.0"
+    "zustand": "^4.4.7"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",

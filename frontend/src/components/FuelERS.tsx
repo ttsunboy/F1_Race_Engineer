@@ -84,6 +84,41 @@ export const FuelERS: React.FC = () => {
               {lapsToGo > 0 ? `${lapsToGo} to go` : 'Finished'}
             </span>
           </div>
+
+          {/* Fuel per-lap: live estimate + settled actual vs estimate delta */}
+          <div className="mt-2 pt-2 border-t border-f1-gray/60 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">Est / lap</span>
+              <span className="text-blue-300 font-mono font-semibold">
+                {fuelLapsRemaining > 0.5
+                  ? `${((car.fuel_in_tank || 0) / fuelLapsRemaining).toFixed(2)} kg`
+                  : '--'}
+              </span>
+            </div>
+            {car.fuel_last_used !== undefined && car.fuel_last_used !== null && (
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-400">Last lap</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-gray-200 font-mono font-semibold">
+                    {car.fuel_last_used.toFixed(2)} kg
+                  </span>
+                  {car.fuel_est_per_lap !== undefined && car.fuel_est_per_lap !== null && (
+                    (() => {
+                      const delta = car.fuel_last_used! - car.fuel_est_per_lap!;
+                      const color = Math.abs(delta) < 0.05
+                        ? 'text-gray-400'
+                        : delta > 0 ? 'text-red-400' : 'text-green-400';
+                      return (
+                        <span className={`font-mono font-bold ${color}`}>
+                          {delta >= 0 ? '+' : ''}{delta.toFixed(2)}
+                        </span>
+                      );
+                    })()
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ERS */}

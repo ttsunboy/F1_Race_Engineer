@@ -1,27 +1,41 @@
 /**
  * Pit Stop Prediction - 进站掉位预测.
  *
- * 后端内置每站固定进站损失表 (绿旗基准, SC/VSC 按比例折算), 实时计算:
- * 当前位置 + 当前条件下进站会掉到第几名。三种条件 (绿旗/SC/DS) 分开显示。
+ * 后端内置每站固定进站损失表, 实时计算:
+ * 当前位置 + 当前条件下进站会掉到第几名。合并显示为两个条件 (绿旗 / SC+VSC)。
  */
 import React from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
-import { Flag, Shield, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import type { PitCondition } from '@/types/telemetry';
 
-const CONDITION_META: Record<
-  PitCondition,
-  { label: string; icon: React.ReactNode; rowClass: string }
-> = {
-  green: { label: '绿旗进站', icon: <Flag className="w-4 h-4 text-green-400" />, rowClass: 'border-green-900/50' },
-  sc: { label: 'SC 安全车', icon: <Shield className="w-4 h-4 text-yellow-400" />, rowClass: 'border-yellow-900/50' },
-  ds: { label: 'DS/VSC', icon: <AlertTriangle className="w-4 h-4 text-orange-400" />, rowClass: 'border-orange-900/50' },
-};
+// 两张卡: 绿旗 / SC+VSC (损失时间相同)
+const CONDITIONS: PitCondition[] = ['green', 'sc'];
 
-const CONDITIONS: PitCondition[] = ['green', 'sc', 'ds'];
+const CONDITION_LABEL: Record<string, string> = {
+  green: 'GREEN',
+  sc: 'SC / VSC',
+};
 
 function formatLoss(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+// delta 样式: 箭头 + 数字 (gain=绿上行, loss=红下行)
+function DeltaBadge({ value }: { value: number }) {
+  const isGain = value < 0; // 掉位是正数, 所以负数是 gain (位置变好了)
+  const isFlat = value === 0;
+  const color = isFlat ? '#888888' : isGain ? '#00D656' : '#FF3838';
+  const Icon = isFlat ? Minus : isGain ? TrendingUp : TrendingDown;
+
+  return (
+    <div className="flex items-center gap-1">
+      <Icon className="w-3.5 h-3.5" style={{ color }} />
+      <span className="text-sm font-mono font-bold" style={{ color }}>
+        {isFlat ? '0' : `${Math.abs(value)}`}
+      </span>
+    </div>
+  );
 }
 
 export const PitStopPrediction: React.FC = () => {
@@ -29,69 +43,58 @@ export const PitStopPrediction: React.FC = () => {
 
   if (!pitLoss || !pitLoss.losses) return null;
 
-  const trackId = pitLoss.track_id ?? '—';
   const currentPos = pitLoss.prediction?.current_position ?? null;
   const predicted = pitLoss.prediction?.predicted ?? {};
 
   return (
-    <div className="bg-f1-darker rounded-lg p-4 border border-f1-gray">
-      {/* Track + current position header */}
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <div className="text-[10px] text-gray-500 uppercase tracking-wide">Pit Stop Prediction</div>
-          <div className="text-sm text-gray-300 mt-0.5">{trackId}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] text-gray-500 uppercase tracking-wide">当前位置</div>
-          <div className="text-3xl font-bold text-white leading-none mt-0.5">
-            {currentPos ? `P${currentPos}` : '—'}
-          </div>
-        </div>
-      </div>
-
-      {/* Per-condition predicted position */}
-      <div className="grid grid-cols-3 gap-2">
+    <div className="bg-f1-darker rounded-lg p-3 border border-f1-gray">
+      {/* Two cards side by side */}
+      <div className="grid grid-cols-2 gap-2">
         {CONDITIONS.map((cond) => {
-          const meta = CONDITION_META[cond];
           const info = pitLoss.losses[cond];
           const isCurrent = pitLoss.condition === cond;
           const predPos = predicted[cond];
           const drop = currentPos && predPos != null ? predPos - currentPos : null;
 
+          const cardClass =
+            cond === 'green'
+              ? 'border-green-900/50'
+              : 'border-yellow-900/50';
+
+          const accent =
+            cond === 'green'
+              ? 'text-green-400'
+              : 'text-yellow-400';
+
           return (
             <div
               key={cond}
-              className={`rounded-lg p-2 text-center border ${
+              className={`rounded-lg p-3 border ${
                 isCurrent ? 'bg-f1-dark ring-1 ring-white/30' : 'bg-f1-dark/60'
-              } ${meta.rowClass}`}
+              } ${cardClass}`}
             >
-              <div className="flex items-center justify-center gap-1 text-xs text-gray-300 mb-1">
-                {meta.icon}
-                <span>{meta.label}</span>
+              <div className={`text-[10px] font-semibold uppercase tracking-wide ${accent}`}>
+                {CONDITION_LABEL[cond]}
               </div>
-              <div className="text-[10px] text-gray-500">损失 {formatLoss(info?.loss_ms ?? 0)}</div>
-              <div className="text-xl font-bold text-white mt-1">
-                {predPos != null ? `P${predPos}` : '—'}
-              </div>
-              <div className="text-[10px] mt-0.5">
-                {isCurrent ? (
-                  <span className="text-gray-400">当前条件</span>
-                ) : drop != null && drop !== 0 ? (
-                  <span className={drop > 0 ? 'text-red-400' : 'text-green-400'}>
-                    {drop > 0 ? `掉 ${drop} 位` : `升 ${-drop} 位`}
-                  </span>
+
+              <div className="flex items-end justify-between mt-2">
+                <div>
+                  <div className="text-[10px] text-gray-500">{formatLoss(info?.loss_ms ?? 0)} loss</div>
+                  <div className="text-2xl font-bold text-white leading-tight mt-0.5">
+                    {predPos != null ? `P${predPos}` : '—'}
+                  </div>
+                </div>
+
+                {drop != null ? (
+                  <DeltaBadge value={drop} />
                 ) : (
-                  <span className="text-gray-600">不掉位</span>
+                  <span className="text-xs text-gray-600">—</span>
                 )}
               </div>
             </div>
           );
         })}
       </div>
-
-      <p className="text-[10px] text-gray-600 mt-2">
-        基于内置标准进站损失表 · 后方车辆 gap ≤ 我方差距 + 损失时间即会超过
-      </p>
     </div>
   );
 };

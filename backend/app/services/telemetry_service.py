@@ -12,6 +12,8 @@ from app.utils.enums import (
 from app.services.race_recap_service import RaceRecapService
 from app.services.pit_loss_service import PitLossService, condition_from_safety_car_status
 
+TRACK_CALIBRATION_ENABLED = False
+
 
 def get_attr(obj, *names, default=None):
     """Get attribute from object, trying multiple names (for library compatibility)"""
@@ -40,7 +42,7 @@ class TelemetryService:
             "current_lap_sectors": {},  # {car_index: [s1_time, s2_time, s3_time]} - updates in real-time
             "starting_grid": {},  # {car_index: position}
             "race_strategy": {
-                "tire_allocation": {"soft": 0, "medium": 0, "hard": 0, "inter": 0, "wet": 0},
+                "tire_allocation": {"soft": 4, "medium": 2, "hard": 1, "inter": 5, "wet": 2},
                 "planned_pit_stops": []
             },
             "pit_loss": None,  # {track_id, condition, losses, prediction}
@@ -50,13 +52,16 @@ class TelemetryService:
         self.recorded_packets = []
         self.session_start_time = None
         self.last_lap_numbers = {}  # Track last lap number for each car to detect lap completion
+        self._fuel_track = {}  # Per-car fuel tracking: {idx: {fuel_at_lap_end, fuel_last_used, fuel_est_per_lap, pit_stops}}
         self.sector_times_cache = {}  # Cache sector times before they reset: {car_index: {s1: X, s2: Y}}
         self.last_sectors = {}  # Track last sector to detect sector changes: {car_index: sector_num}
         self.race_recap_service = RaceRecapService()  # Race recap and history service
         self.last_positions = {}  # Track last position for each car to detect position changes
         self.pit_loss_service = PitLossService()  # 内置固定进站损失表 (按站×条件)
         self._last_session_uid = None  # Detect new race via session_uid change
+        self._marshal_zone_flags = {}
         self._pit_condition = "green"  # Current track condition (green/sc/ds)
+        self._track_calibration = None
         self._lap_history_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'lap_history.json')
         self._load_lap_history()
 
@@ -64,7 +69,11 @@ class TelemetryService:
         try:
             if os.path.exists(self._lap_history_file):
                 with open(self._lap_history_file, 'r', encoding='utf-8') as f:
-                    self.current_state['lap_history'] = json.load(f)
+                    loaded = json.load(f)
+                    # lap_history must be a dict {car_index: [...]}; tolerate legacy [] from old clear()
+                    if not isinstance(loaded, dict):
+                        loaded = {}
+                    self.current_state['lap_history'] = loaded
         except Exception:
             self.current_state['lap_history'] = {}
 
@@ -77,7 +86,7 @@ class TelemetryService:
             pass
 
     async def clear_lap_history(self):
-        self.current_state['lap_history'] = {}
+        self.current_state['lap_history'] = {}  # dict keyed by car_index, NOT [] — list breaks later [idx]=[] assignment
         self.current_state['best_sectors'] = {}
         self.current_state['current_lap_sectors'] = {}
         self._save_lap_history()
@@ -96,13 +105,15 @@ class TelemetryService:
     async def handle_packet(self, packet_type_id: int, packet):
         """Process received packet and update state"""
         try:
-            # Packet type IDs: 0=Motion, 1=Session, 2=LapData, 4=Participants, 6=CarTelemetry, 7=CarStatus, 10=CarDamage
+            # Packet type IDs: 0=Motion, 1=Session, 2=LapData, 3=Event, 4=Participants, 6=CarTelemetry, 7=CarStatus, 10=CarDamage
             if packet_type_id == 1:  # SESSION
                 await self._handle_session_packet(packet)
             elif packet_type_id == 4:  # PARTICIPANTS
                 await self._handle_participants_packet(packet)
             elif packet_type_id == 2:  # LAP_DATA
                 await self._handle_lap_data_packet(packet)
+            elif packet_type_id == 3:  # EVENT
+                await self._handle_event_packet(packet)
             elif packet_type_id == 6:  # CAR_TELEMETRY
                 await self._handle_telemetry_packet(packet)
             elif packet_type_id == 7:  # CAR_STATUS
@@ -122,12 +133,61 @@ class TelemetryService:
 
         except Exception as e:
             print(f"Error handling packet: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def _handle_event_packet(self, packet):
+        """Broadcast the game's authoritative event packet to connected clients."""
+        details = get_attr(packet, 'event_details', default=None)
+        if hasattr(details, '__dict__'):
+            details = details.__dict__
+
+        header = get_attr(packet, 'header', default=None)
+        await self._broadcast_update('event', {
+            'code': get_attr(packet, 'event_string_code', default=''),
+            'details': details,
+            'session_time': get_attr(header, 'session_time', default=0),
+        })
 
     def get_track_override(self) -> str:
         return self._track_override
 
     def set_track_override(self, track_name: str):
         self._track_override = track_name
+
+    def start_track_calibration(self) -> dict:
+        """Start collecting player motion samples for SVG track calibration."""
+        if not TRACK_CALIBRATION_ENABLED:
+            return {"status": "disabled", "message": "Track calibration is currently disabled."}
+        session = self.current_state.get("session", {})
+        self._track_calibration = {
+            "track_id": session.get("track_id"),
+            "session_uid": session.get("session_uid"),
+            "samples": [],
+        }
+        return {"status": "started", "track_id": session.get("track_id")}
+
+    def stop_track_calibration(self) -> dict:
+        """Stop calibration capture and return the sampled motion path."""
+        if not TRACK_CALIBRATION_ENABLED:
+            return {"status": "disabled", "samples": []}
+        capture = self._track_calibration
+        self._track_calibration = None
+        if capture is None:
+            return {"status": "not_running", "samples": []}
+
+        output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "track_calibration_latest.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(capture, f, indent=2)
+        return {
+            "status": "stopped",
+            "track_id": capture["track_id"],
+            "sample_count": len(capture["samples"]),
+            "file": output_path,
+            "samples": capture["samples"],
+        }
 
     async def _handle_session_packet(self, packet):
         """Handle session data packet"""
@@ -170,6 +230,16 @@ class TelemetryService:
             else:
                 track_id = "Unknown Track"
 
+        # 临时采集钩子: 仅当遥测真的带来非零长度时记录真实赛道长度 (跳过 F1 World 清零场景)
+        # 采集数据存 backend/data/track_lengths_collected.json, 攒齐后硬编码进 TRACK_LENGTHS 再删除本钩子
+        if track_length > 0 and raw_track_id is not None:
+            try:
+                from app.utils.track_length_collector import record as _tl_record, save as _tl_save
+                _tl_record(raw_track_id, track_length)
+                _tl_save()
+            except Exception:
+                pass
+
         self.current_state["session"] = {
             "session_uid": get_attr(header, 'session_uid', 'sessionUID', 'm_sessionUID', default=0),
             "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
@@ -183,10 +253,18 @@ class TelemetryService:
             "session_time_left": get_attr(packet, 'session_time_left', 'sessionTimeLeft', 'm_sessionTimeLeft', default=0),
             "session_duration": get_attr(packet, 'session_duration', 'sessionDuration', 'm_sessionDuration', default=0),
             "pit_speed_limit": get_attr(packet, 'pit_speed_limit', 'pitSpeedLimit', 'm_pitSpeedLimit', default=0),
+            "marshal_zones": [
+                {
+                    "zone_start": get_attr(zone, 'zone_start', 'zoneStart', 'm_zoneStart', default=0),
+                    "zone_flag": int(get_attr(zone, 'zone_flag', 'zoneFlag', 'm_zoneFlag', default=0)),
+                }
+                for zone in get_attr(packet, 'marshal_zones', 'marshalZones', 'm_marshalZones', default=[])
+            ],
             "safety_car_status": get_attr(packet, 'safety_car_status', 'safetyCarStatus', 'm_safetyCarStatus', default=0),
             "is_spectating": get_attr(packet, 'is_spectating', 'isSpectating', 'm_isSpectating', default=0),
             "num_marshal_zones": get_attr(packet, 'num_marshal_zones', 'numMarshalZones', 'm_numMarshalZones', default=0),
             "forecast_accuracy": get_attr(packet, 'forecast_accuracy', 'forecastAccuracy', 'm_forecastAccuracy', default=0),
+            "time_of_day": get_attr(packet, 'time_of_day', 'timeOfDay', 'm_timeOfDay', default=0),
             "weather_forecast_samples": self._extract_forecast(packet),
         }
 
@@ -199,6 +277,27 @@ class TelemetryService:
         self._pit_condition = condition_from_safety_car_status(
             self.current_state["session"].get("safety_car_status", 0)
         )
+
+        current_zone_flags = {
+            index: zone["zone_flag"]
+            for index, zone in enumerate(self.current_state["session"]["marshal_zones"])
+        }
+        if self._marshal_zone_flags:
+            for index, flag in current_zone_flags.items():
+                previous_flag = self._marshal_zone_flags.get(index)
+                if previous_flag != flag and flag == 3:
+                    await self._broadcast_update("event", {
+                        "code": "YFLG",
+                        "details": {"zone_index": index, "enabled": True},
+                        "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
+                    })
+                elif previous_flag == 3 and flag != 3:
+                    await self._broadcast_update("event", {
+                        "code": "YFLG",
+                        "details": {"zone_index": index, "enabled": False},
+                        "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
+                    })
+        self._marshal_zone_flags = current_zone_flags
 
         await self._broadcast_update("session", self.current_state["session"])
 
@@ -230,6 +329,7 @@ class TelemetryService:
         self._save_lap_history()
         self.current_state["starting_grid"] = {}
         self.current_state["pit_loss"] = None
+        self._marshal_zone_flags = {}
         self.sector_times_cache = {}
         self.last_lap_numbers = {}
         self.last_sectors = {}
@@ -251,9 +351,11 @@ class TelemetryService:
             raw_name = get_attr(p, 'name', 'm_name', default='')
             name = raw_name if isinstance(raw_name, str) else raw_name.decode('utf-8', errors='ignore').rstrip('\x00')
             ai_controlled = get_attr(p, 'ai_controlled', 'aiControlled', 'm_aiControlled', default=1)
+            driver_id = get_attr(p, 'driver_id', 'driverId', 'm_driverId', default=255)
 
             participants[idx] = {
                 "name": name,
+                "driver_id": driver_id,
                 "team_id": format_enum(get_attr(p, 'team_id', 'teamId', 'm_teamId'), TEAMS),
                 "race_number": get_attr(p, 'race_number', 'raceNumber', 'm_raceNumber', default=0),
                 "nationality": get_attr(p, 'nationality', 'm_nationality', default=0),
@@ -338,7 +440,7 @@ class TelemetryService:
                     # Sector changed!
                     if previous_sector == 0 and current_sector == 1:
                         # Just completed Sector 1, entering Sector 2
-                        s1_time = current_lap_time_ms
+                        s1_time = sector1_time_ms if sector1_time_ms > 0 else current_lap_time_ms
                         self.sector_times_cache[idx]["s1"] = s1_time
                         self.current_state["current_lap_sectors"][idx][0] = s1_time
 
@@ -355,14 +457,12 @@ class TelemetryService:
 
                     elif previous_sector == 1 and current_sector == 2:
                         # Just completed Sector 2, entering Sector 3
-                        cumulative_s2 = current_lap_time_ms
-                        s1_time = self.sector_times_cache[idx]["s1"]
-                        s2_time = cumulative_s2 - s1_time if s1_time > 0 else 0
-                        self.sector_times_cache[idx]["s2"] = cumulative_s2
+                        s2_time = sector2_time_ms
+                        self.sector_times_cache[idx]["s2"] = s2_time
                         self.current_state["current_lap_sectors"][idx][1] = s2_time
 
                         if idx == self.current_state.get("player_car_index"):
-                            print(f"Sector 2 completed! Individual time: {s2_time}ms, Cumulative: {cumulative_s2}ms")
+                            print(f"Sector 2 completed! Individual time: {s2_time}ms")
                             # Update best sector if this is better
                             if idx not in self.current_state["best_sectors"]:
                                 self.current_state["best_sectors"][idx] = {"s1": None, "s2": None, "s3": None}
@@ -381,6 +481,28 @@ class TelemetryService:
 
                     # Lap completed
                     if current_lap_num > last_lap and last_lap_time_ms > 0:
+                        # ---- Fuel per-lap settlement (actual vs game-estimated) ----
+                        fuel_now = car_data.get("fuel_in_tank", 0)
+                        fuel_laps = car_data.get("fuel_remaining_laps", 0)
+                        ft = self._fuel_track.setdefault(idx, {"fuel_at_lap_end": None, "fuel_last_used": None, "fuel_est_per_lap": None, "pit_stops": 0})
+                        pit_increased = (num_pit_stops or 0) > ft["pit_stops"]
+                        if ft["fuel_at_lap_end"] is not None and fuel_now >= 0:
+                            if pit_increased or fuel_now > ft["fuel_at_lap_end"] + 0.5:
+                                # Pitted this lap (fuel added) - cannot compute actual usage
+                                ft["fuel_last_used"] = None
+                            else:
+                                used = ft["fuel_at_lap_end"] - fuel_now
+                                if 0 <= used <= 15:  # sanity: a lap burns 0-15 kg
+                                    ft["fuel_last_used"] = round(used, 2)
+                                    # Game estimate at settlement time: fuel_left / laps_game_thinks_left
+                                    if fuel_laps > 0.5:
+                                        ft["fuel_est_per_lap"] = round(fuel_now / fuel_laps, 2)
+                        ft["fuel_at_lap_end"] = fuel_now if fuel_now >= 0 else ft["fuel_at_lap_end"]
+                        ft["pit_stops"] = num_pit_stops or 0
+                        car_data["fuel_last_used"] = ft["fuel_last_used"]
+                        car_data["fuel_est_per_lap"] = ft["fuel_est_per_lap"]
+                        self.current_state["cars"][idx] = car_data
+                        # ---- end fuel settlement ----
                         if idx not in self.current_state["lap_history"]:
                             self.current_state["lap_history"][idx] = []
 
@@ -388,17 +510,11 @@ class TelemetryService:
                         cached_s1 = self.sector_times_cache.get(idx, {}).get("s1", 0)
                         cached_s2 = self.sector_times_cache.get(idx, {}).get("s2", 0)
 
-                        # Calculate individual sector times
-                        # F1 telemetry provides cumulative times:
-                        # - sector1_time_ms = time to complete S1
-                        # - sector2_time_ms = time to complete S1 + S2
-                        # So individual times are:
-                        # - S1 = sector1_time_ms
-                        # - S2 = sector2_time_ms - sector1_time_ms
-                        # - S3 = last_lap_time_ms - sector2_time_ms
+                        # F1 telemetry provides S1 and S2 as individual sector times.
+                        # S3 is the remaining portion of the completed lap.
                         s1_time = cached_s1 if cached_s1 > 0 else 0
-                        s2_time = (cached_s2 - cached_s1) if (cached_s2 > 0 and cached_s1 > 0) else 0
-                        s3_time = (last_lap_time_ms - cached_s2) if (cached_s2 > 0 and last_lap_time_ms > 0) else 0
+                        s2_time = cached_s2 if cached_s2 > 0 else 0
+                        s3_time = (last_lap_time_ms - cached_s1 - cached_s2) if (cached_s1 > 0 and cached_s2 > 0 and last_lap_time_ms > 0) else 0
 
                         # Update S3 in current lap sectors
                         self.current_state["current_lap_sectors"][idx][2] = s3_time
@@ -417,9 +533,8 @@ class TelemetryService:
                             print(f"  Cached Sector1 cumulative: {cached_s1}ms")
                             print(f"  Cached Sector2 cumulative: {cached_s2}ms")
                             print(f"  Calculated S1: {s1_time}ms, S2: {s2_time}ms, S3: {s3_time}ms")
-                            # Broadcast final sector update
+                            # Broadcast final sector update (pre-reset)
                             await self._broadcast_update("current_lap_sectors", self.current_state["current_lap_sectors"][idx])
-                            await self._broadcast_update("best_sectors", self.current_state["best_sectors"][idx])
 
                         # Reset cache and sector tracking for new lap
                         self.sector_times_cache[idx] = {"s1": 0, "s2": 0}
@@ -449,6 +564,18 @@ class TelemetryService:
                         if s3_time > 0:
                             if self.current_state["best_sectors"][idx]["s3"] is None or s3_time < self.current_state["best_sectors"][idx]["s3"]:
                                 self.current_state["best_sectors"][idx]["s3"] = s3_time
+
+                        # Broadcast player history/sectors once per completed lap (not per packet)
+                        if idx == self.current_state.get("player_car_index"):
+                            if idx in self.current_state["best_sectors"]:
+                                await self._broadcast_update("best_sectors", self.current_state["best_sectors"][idx])
+                            if idx in self.current_state["lap_history"]:
+                                await self._broadcast_update("lap_history", self.current_state["lap_history"][idx])
+                            if idx in self.current_state["starting_grid"]:
+                                await self._broadcast_update("starting_grid", {
+                                    "start_position": self.current_state["starting_grid"][idx],
+                                    "current_position": self.current_state["cars"].get(idx, {}).get("position", 0)
+                                })
 
                     self.last_lap_numbers[idx] = current_lap_num
 
@@ -507,19 +634,9 @@ class TelemetryService:
         self.current_state["timing"] = timing_data
         await self._broadcast_update("timing", timing_data)
 
-        # Broadcast player lap history and best sectors if updated
+        # Broadcast player car data (real-time; sent on every packet)
         if self.current_state.get("player_car_index") is not None:
             player_idx = self.current_state["player_car_index"]
-            if player_idx in self.current_state["lap_history"]:
-                await self._broadcast_update("lap_history", self.current_state["lap_history"][player_idx])
-            if player_idx in self.current_state["best_sectors"]:
-                await self._broadcast_update("best_sectors", self.current_state["best_sectors"][player_idx])
-            if player_idx in self.current_state["starting_grid"]:
-                await self._broadcast_update("starting_grid", {
-                    "start_position": self.current_state["starting_grid"][player_idx],
-                    "current_position": self.current_state["cars"].get(player_idx, {}).get("position", 0)
-                })
-            # Broadcast player car data (includes sector info)
             if player_idx in self.current_state["cars"]:
                 await self._broadcast_update("player_telemetry", self.current_state["cars"][player_idx])
 
@@ -644,6 +761,13 @@ class TelemetryService:
                 fuel_mix = get_attr(status, 'fuel_mix', 'fuelMix', 'm_fuelMix', default=0)
                 front_brake_bias = get_attr(status, 'front_brake_bias', 'frontBrakeBias', 'm_frontBrakeBias', default=0)
                 drs_allowed = get_attr(status, 'drs_allowed', 'drsAllowed', 'm_drsAllowed')
+                drs_activation_distance = get_attr(
+                    status,
+                    'drs_activation_distance',
+                    'drsActivationDistance',
+                    'm_drsActivationDistance',
+                    default=0,
+                )
                 tyre_compound = get_attr(status, 'actual_tyre_compound', 'actualTyreCompound', 'm_actualTyreCompound')
                 tyre_visual_compound = get_attr(status, 'visual_tyre_compound', 'visualTyreCompound', 'm_visualTyreCompound')
                 tyre_age_laps = get_attr(status, 'tyres_age_laps', 'tyresAgeLaps', 'm_tyresAgeLaps', default=0)
@@ -662,6 +786,7 @@ class TelemetryService:
                     "fuel_mix": fuel_mix,
                     "front_brake_bias": front_brake_bias,
                     "drs_allowed": format_enum(drs_allowed, DRS_ALLOWED),
+                    "drs_activation_distance": drs_activation_distance,
                     "tyre_compound": format_enum(tyre_compound, TYRE_COMPOUNDS),
                     "tyre_visual_compound": format_enum(tyre_visual_compound, TYRE_COMPOUNDS),
                     "tyre_age_laps": tyre_age_laps,
@@ -737,6 +862,19 @@ class TelemetryService:
                     "g_force_vert": round(g_force_vert, 2)
                 })
                 self.current_state["cars"][idx] = car_data
+
+                if self._track_calibration is not None and idx == self.current_state.get("player_car_index"):
+                    if len(self._track_calibration["samples"]) < 100_000:
+                        self._track_calibration["samples"].append({
+                            "session_time": get_attr(get_attr(packet, 'header', default=None), 'session_time', default=0),
+                            "lap_distance": self.current_state["cars"][idx].get("lap_distance"),
+                            "current_lap": self.current_state["cars"][idx].get("current_lap"),
+                            "world_x": world_pos_x,
+                            "world_y": world_pos_y,
+                            "world_z": world_pos_z,
+                            "forward_x": get_attr(motion, 'world_forward_dir_x', 'worldForwardDirX', 'm_worldForwardDirX', default=0),
+                            "forward_z": get_attr(motion, 'world_forward_dir_z', 'worldForwardDirZ', 'm_worldForwardDirZ', default=0),
+                        })
 
                 # Collect position for track map
                 positions.append({

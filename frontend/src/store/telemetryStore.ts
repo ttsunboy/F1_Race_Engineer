@@ -11,6 +11,7 @@ import {
   CarPosition,
   WebSocketMessage,
   RaceStrategy,
+  RaceEventData,
 } from '@/types/telemetry';
 
 interface TelemetryStore extends TelemetryState {
@@ -25,6 +26,9 @@ interface TelemetryStore extends TelemetryState {
   setConnected: (connected: boolean) => void;
   handleWebSocketMessage: (message: WebSocketMessage) => void;
   updateRaceStrategy: (strategy: Partial<RaceStrategy>) => void;
+  addRaceEvent: (event: RaceEventData) => void;
+  clearRaceEvents: () => void;
+  setHighlightedCarIndex: (index: number | null) => void;
   reset: () => void;
 }
 
@@ -43,8 +47,10 @@ const initialState: TelemetryState = {
     planned_pit_stops: []
   },
   pit_loss: null,
+  race_events: [],
   connected: false,
   last_update: null,
+  highlighted_car_index: null,
 };
 
 export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
@@ -52,7 +58,7 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
   playerCarIndex: null,
 
   setPlayerCarIndex: (index) =>
-    set({ playerCarIndex: index }),
+    set((state) => state.playerCarIndex === index ? state : { playerCarIndex: index }),
 
   setSession: (session) =>
     set({
@@ -98,11 +104,33 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
 
     switch (type) {
       case 'initial_state':
+        // Player index: prefer explicit, fall back to detecting non-AI participant
+        const rawIdx = data.player_car_index;
+        const detectedIdx = Object.entries(data.participants || {}).find(
+          ([_, p]: [string, any]) => p.ai_controlled === 0
+        )?.[0];
+        const pIdx = rawIdx !== undefined && rawIdx !== null
+          ? String(rawIdx)
+          : (detectedIdx !== undefined ? detectedIdx : undefined);
         set({
           session: data.session || null,
           participants: data.participants || {},
           cars: data.cars || {},
           timing: data.timing || [],
+          playerCarIndex: pIdx !== undefined ? parseInt(pIdx) : null,
+          // Per-player history/sectors live in dicts keyed by car index
+          lap_history: pIdx !== undefined && data.lap_history?.[pIdx] ? data.lap_history[pIdx] : [],
+          best_sectors: pIdx !== undefined && data.best_sectors?.[pIdx] ? data.best_sectors[pIdx] : null,
+          current_lap_sectors: pIdx !== undefined && data.current_lap_sectors?.[pIdx]
+            ? data.current_lap_sectors[pIdx]
+            : null,
+          starting_grid: pIdx !== undefined && data.starting_grid?.[pIdx] !== undefined
+            ? {
+                start_position: data.starting_grid[pIdx],
+                current_position: data.cars?.[pIdx]?.position ?? 0,
+              }
+            : null,
+          race_strategy: data.race_strategy || initialState.race_strategy,
           connected: true,
           last_update: new Date().toISOString(),
         });
@@ -183,6 +211,20 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
         });
         break;
 
+      case 'race_strategy':
+        set((state) => ({
+          race_strategy: {
+            ...state.race_strategy,
+            ...data,
+            tire_allocation: {
+              ...state.race_strategy.tire_allocation,
+              ...(data?.tire_allocation || {}),
+            },
+          },
+          last_update: new Date().toISOString(),
+        }));
+        break;
+
       case 'pit_loss':
         set({
           pit_loss: data,
@@ -198,6 +240,7 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
           current_lap_sectors: null,
           starting_grid: null,
           pit_loss: null,
+          race_events: [],
           last_update: new Date().toISOString(),
         });
         break;
@@ -216,6 +259,12 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
         window.dispatchEvent(new CustomEvent('race_finished', { detail: data }));
         break;
 
+      case 'event':
+        if (data && typeof data.code === 'string') {
+          get().addRaceEvent(data as RaceEventData);
+        }
+        break;
+
       case 'ping':
         // Respond to ping if needed
         break;
@@ -230,9 +279,20 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
       race_strategy: {
         ...state.race_strategy,
         ...strategy,
+        tire_allocation: {
+          ...state.race_strategy.tire_allocation,
+          ...(strategy.tire_allocation || {}),
+        },
       },
     }));
   },
+
+  addRaceEvent: (event) =>
+    set((state) => ({ race_events: [event, ...state.race_events].slice(0, 100) })),
+
+  clearRaceEvents: () => set({ race_events: [] }),
+
+  setHighlightedCarIndex: (index) => set({ highlighted_car_index: index }),
 
   reset: () => set(initialState),
 }));

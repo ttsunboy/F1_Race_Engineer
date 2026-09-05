@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     packet_processing_interval: float = 0.016  # ~60 FPS
 
     # CORS settings
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # Local tool: allow any origin so the dashboard works from localhost,
+    # 127.0.0.1, LAN IPs, etc. (no cookies/credentials used)
+    cors_origins: list[str] = ["*"]
 
     class Config:
         env_file = ".env"

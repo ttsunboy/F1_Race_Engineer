@@ -1,50 +1,75 @@
 /**
  * Session Information Component - 赛况 (绿旗/SC/VSC) + 天气与预报
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { formatTemperature, formatLapTime } from '@/utils/formatting';
-import { Cloud, CloudRain, Sun, Flag, Shield, AlertTriangle } from 'lucide-react';
+import {
+  BsSunFill, BsCloudSunFill, BsCloudsFill, BsCloudDrizzleFill,
+  BsCloudRainHeavyFill, BsCloudLightningRainFill,
+  BsMoonStarsFill, BsCloudMoonFill,
+  BsFlag, BsShield, BsFillExclamationTriangleFill,
+  BsChevronLeft, BsChevronRight,
+} from 'react-icons/bs';
 
-// 天气图标: 后端 weather 值含空格 ("Light Rain"), 归一化后再匹配
-const getWeatherIcon = (weather: string | undefined, size = 'w-5 h-5') => {
-  if (!weather) return <Cloud className={`${size} text-gray-400`} />;
-  switch (weather.toUpperCase().replace(/ /g, '_')) {
-    case 'CLEAR':
-      return <Sun className={`${size} text-yellow-400`} />;
-    case 'LIGHT_RAIN':
-    case 'HEAVY_RAIN':
-    case 'STORM':
-      return <CloudRain className={`${size} text-blue-400`} />;
-    default:
-      return <Cloud className={`${size} text-gray-400`} />;
+// 天气图标 (Bootstrap Icons, 用 filled 实心版):
+//   0 Clear = bi-sun-fill (夜间: bi-moon-stars-fill)
+//   1 Light Cloud = bi-cloud-sun-fill (夜间: bi-cloud-moon-fill)
+//   2 Overcast = bi-clouds-fill
+//   3 Light Rain = bi-cloud-drizzle-fill
+//   4 Heavy Rain = bi-cloud-rain-heavy-fill
+//   5 Storm = bi-cloud-lightning-rain-fill
+// 后端 weather 值是带空格的字符串, 归一化后匹配; nightIcon 用于夜间晴天/少云
+const WEATHER_META: Record<string, { icon: React.ReactNode; nightIcon?: React.ReactNode; color: string; label: string }> = {
+  CLEAR: { icon: <BsSunFill />, nightIcon: <BsMoonStarsFill />, color: 'text-yellow-400', label: 'Clear 晴' },
+  LIGHT_CLOUD: { icon: <BsCloudSunFill />, nightIcon: <BsCloudMoonFill />, color: 'text-gray-300', label: 'Light Cloud 少云' },
+  OVERCAST: { icon: <BsCloudsFill />, color: 'text-gray-400', label: 'Overcast 阴天' },
+  LIGHT_RAIN: { icon: <BsCloudDrizzleFill />, color: 'text-blue-300', label: 'Light Rain 小雨' },
+  HEAVY_RAIN: { icon: <BsCloudRainHeavyFill />, color: 'text-blue-400', label: 'Heavy Rain 大雨' },
+  STORM: { icon: <BsCloudLightningRainFill />, color: 'text-purple-400', label: 'Storm 雷暴' },
+};
+
+// 夜间判断: time_of_day 是当天经过的毫秒数, 约 19:00-06:00 视为夜赛
+const isNightTime = (timeOfDay: number | undefined): boolean => {
+  if (!timeOfDay || timeOfDay <= 0) return false;
+  const hour = (timeOfDay / 3600000) % 24;
+  return hour >= 19 || hour < 6;
+};
+
+const getWeatherMeta = (weather: string | undefined, night = false) => {
+  if (!weather) return WEATHER_META.OVERCAST;
+  const meta = WEATHER_META[weather.toUpperCase().replace(/ /g, '_')] ?? WEATHER_META.OVERCAST;
+  // 夜间: 晴天/少云换成月亮图标
+  if (night && meta.nightIcon) {
+    return { ...meta, icon: meta.nightIcon };
   }
+  return meta;
 };
 
 // safety_car_status: 0=绿旗 1=SC 2=VSC 3=编队圈
 const STATUS_META: Record<number, { label: string; cls: string; icon: React.ReactNode; pulse: boolean }> = {
   0: {
-    label: '绿旗 GREEN',
+    label: 'GREEN FLAG',
     cls: 'border-green-700/60 bg-green-900/30 text-green-300',
-    icon: <Flag className="w-4 h-4" />,
+    icon: <BsFlag className="w-4 h-4" />,
     pulse: false,
   },
   1: {
     label: 'SAFETY CAR',
     cls: 'border-yellow-500 bg-yellow-500/15 text-yellow-300',
-    icon: <Shield className="w-4 h-4" />,
+    icon: <BsShield className="w-4 h-4" />,
     pulse: true,
   },
   2: {
-    label: 'VSC 虚拟安全车',
+    label: 'VIRTUAL SAFETY CAR',
     cls: 'border-orange-500 bg-orange-500/15 text-orange-300',
-    icon: <AlertTriangle className="w-4 h-4" />,
+    icon: <BsFillExclamationTriangleFill className="w-4 h-4" />,
     pulse: true,
   },
   3: {
-    label: '编队圈',
+    label: 'FORMATION LAP',
     cls: 'border-gray-500 bg-gray-700/30 text-gray-300',
-    icon: <Flag className="w-4 h-4" />,
+    icon: <BsFlag className="w-4 h-4" />,
     pulse: false,
   },
 };
@@ -52,6 +77,11 @@ const STATUS_META: Record<number, { label: string; cls: string; icon: React.Reac
 export const SessionInfo: React.FC = () => {
   const session = useTelemetryStore((state) => state.session);
   const connected = useTelemetryStore((state) => state.connected);
+
+  // 每张卡片一次显示一个样本，左右箭头切换预报时段。
+  const [weatherIdx, setWeatherIdx] = useState(0);
+  const [trackTempIdx, setTrackTempIdx] = useState(0);
+  const [airTempIdx, setAirTempIdx] = useState(0);
 
   if (!session) {
     return (
@@ -77,29 +107,56 @@ export const SessionInfo: React.FC = () => {
   const status = STATUS_META[session.safety_car_status] ?? STATUS_META[0];
 
   const forecastSamples = session.weather_forecast_samples ?? [];
-  const dedupedForecast = Object.values(
+  const samples = Object.values(
     forecastSamples.reduce((acc, f) => {
       acc[f.time_offset] = f;
       return acc;
     }, {} as Record<number, (typeof forecastSamples)[number]>)
   ).sort((a, b) => a.time_offset - b.time_offset);
+  const compactSamples = samples.filter((sample, index) => {
+    if (index === 0) return true;
+    const previous = samples[index - 1];
+    return sample.weather !== previous.weather
+      || sample.rain_percentage !== previous.rain_percentage
+      || sample.track_temperature !== previous.track_temperature
+      || sample.air_temperature !== previous.air_temperature;
+  });
 
-  const pickChanges = <T,>(items: typeof dedupedForecast, getter: (item: typeof dedupedForecast[number]) => T) => {
-    const picked: typeof dedupedForecast = [];
-    let prev = getter({ ...items[0] } as typeof items[number]);
-    for (const item of items) {
-      const cur = getter(item);
-      if (picked.length === 0 || cur !== prev) {
-        picked.push(item);
-        prev = cur;
-      }
-    }
-    return picked.filter((f) => f.time_offset > 0);
+  const currentTrackTemp = session.track_temperature || 0;
+  const currentAirTemp = session.air_temperature || 0;
+  const total = compactSamples.length;
+  const hasWeatherChange = compactSamples.some((sample) =>
+    sample.weather !== session.weather || (sample.rain_percentage ?? 0) > 0
+  );
+  const hasTrackTempChange = compactSamples.some((sample) => sample.track_temperature !== currentTrackTemp);
+  const hasAirTempChange = compactSamples.some((sample) => sample.air_temperature !== currentAirTemp);
+  const hasForecastChanges = hasWeatherChange || hasTrackTempChange || hasAirTempChange;
+
+  const windowStart = (idx: number) => (total ? Math.min(idx, total - 1) : 0);
+  const windowSamples = (start: number) => compactSamples.slice(start, start + 1);
+
+  const makeNav = (idx: number, setIdx: (n: number) => void) => {
+    const maxStart = Math.max(0, total - 1);
+    return {
+      canPrev: total > 1 && idx > 0,
+      canNext: total > 1 && idx < maxStart,
+      prev: () => setIdx(Math.max(0, idx - 1)),
+      next: () => setIdx(Math.min(maxStart, idx + 1)),
+    };
   };
+  const weatherNav = makeNav(weatherIdx, setWeatherIdx);
+  const trackNav = makeNav(trackTempIdx, setTrackTempIdx);
+  const airNav = makeNav(airTempIdx, setAirTempIdx);
 
-  const weatherChanges = pickChanges(dedupedForecast, (f) => `${f.weather}:${f.rain_percentage}`);
-  const trackTempChanges = pickChanges(dedupedForecast, (f) => f.track_temperature);
-  const airTempChanges = pickChanges(dedupedForecast, (f) => f.air_temperature);
+  const wStart = windowStart(weatherIdx);
+  const tStart = windowStart(trackTempIdx);
+  const aStart = windowStart(airTempIdx);
+  const wSamples = windowSamples(wStart);
+  const tSamples = windowSamples(tStart);
+  const aSamples = windowSamples(aStart);
+
+  const isNight = isNightTime(session.time_of_day);
+  const curWeather = getWeatherMeta(session.weather, isNight);
 
   return (
     <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
@@ -109,16 +166,6 @@ export const SessionInfo: React.FC = () => {
       </div>
 
       <div className="space-y-3">
-        {/* 实时赛况指示 (需求 A): SC/VSC 高亮 */}
-        <div
-          className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2 ${status.cls} ${
-            status.pulse ? 'animate-pulse' : ''
-          }`}
-        >
-          {status.icon}
-          <span className="text-sm font-bold tracking-wide">{status.label}</span>
-        </div>
-
         {/* Session type and track */}
         <div>
           <div className="text-2xl font-bold text-white">
@@ -129,75 +176,150 @@ export const SessionInfo: React.FC = () => {
           </div>
         </div>
 
-        {/* Elapsed time */}
-        <div className="bg-f1-darker rounded-lg p-3">
-          <div className="text-xs text-gray-400 mb-1">{canShowElapsed ? 'ELAPSED TIME' : 'SESSION TIME'}</div>
-          <div className="text-2xl font-mono font-bold text-white">
-            {canShowElapsed ? `${minutes}:${seconds.toString().padStart(2, '0')}` : formatLapTime((session.session_time || 0) * 1000)}
+        {/* Elapsed time and race status */}
+        <div className="flex items-stretch gap-2">
+          <div className="min-w-0 flex-1 rounded-lg bg-f1-darker p-3">
+            <div className="text-xs text-gray-400 mb-1">{canShowElapsed ? 'ELAPSED TIME' : 'SESSION TIME'}</div>
+            <div className="text-2xl font-mono font-bold text-white">
+              {canShowElapsed ? `${minutes}:${seconds.toString().padStart(2, '0')}` : formatLapTime((session.session_time || 0) * 1000)}
+            </div>
+          </div>
+          <div
+            className={`flex min-w-[112px] flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center ${status.cls} ${
+              status.pulse ? 'animate-pulse' : ''
+            }`}
+          >
+            {status.icon}
+            <span className="text-[10px] font-bold leading-tight tracking-wide">{status.label}</span>
           </div>
         </div>
 
-        {/* 天气面板: 四行, 每行一个 div, 标题在上、内容横排在下 */}
-        <div className="bg-f1-darker rounded-lg p-3 space-y-3">
-          {/* 天气 */}
-          <div className="bg-f1-dark rounded-lg p-3">
-            <div className="text-xs text-gray-400 mb-2">Weather</div>
-            <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
-              <div className="flex items-center gap-1.5">
-                {getWeatherIcon(session.weather)}
-                <span className="text-sm text-white">
-                  {session.weather?.replace('_', ' ') || 'Unknown'}
-                </span>
-              </div>
-              {weatherChanges.map((f) => (
-                <div key={f.time_offset} className="flex items-center gap-1"
-                     title={`${f.weather}${f.rain_percentage > 0 ? ` · 降雨 ${f.rain_percentage}%` : ''}`}>
-                  <span className="text-gray-600">-</span>
-                  {getWeatherIcon(f.weather, 'w-4 h-4')}
-                  <span className="text-[9px] text-gray-500">+{Math.round(f.time_offset)}min</span>
-                </div>
-              ))}
+        {/* 预报: 三个分类纵向排 (Weather / Track Temp / Air Temp)
+            每分类一张卡片(带底色圆角), 卡片内样本横向排开(样本本身无边框) */}
+        {hasForecastChanges && <div className="space-y-2">
+          {/* Weather 卡片 */}
+          {hasWeatherChange && <div className="bg-f1-darker rounded-lg p-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide w-16 shrink-0">Weather</div>
+            <div
+              title={curWeather.label}
+              className="flex flex-col items-center justify-center w-10 h-14 shrink-0 py-1 min-w-0"
+            >
+              <span className={`text-2xl ${curWeather.color} leading-none`}>{curWeather.icon}</span>
             </div>
-          </div>
-
-          {/* 赛道温度 */}
-          <div className="bg-f1-dark rounded-lg p-3">
-            <div className="text-xs text-gray-400 mb-2">Track Temp</div>
-            <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
-              <span className="text-sm text-white font-mono">
-                {formatTemperature(session.track_temperature || 0)}
-              </span>
-              {trackTempChanges.map((f) => (
-                <span key={f.time_offset} className="text-xs font-mono text-gray-300">
-                  - {formatTemperature(f.track_temperature)}
-                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset)}min</span>
-                </span>
-              ))}
+            <button
+              onClick={weatherNav.prev}
+              disabled={!weatherNav.canPrev}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronLeft className="w-3 h-3" />
+            </button>
+            <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
+              {total === 0 ? (
+                <span className="text-[10px] text-gray-600">No forecast</span>
+              ) : (
+                wSamples.map((f) => {
+                  const meta = getWeatherMeta(f.weather, isNight);
+                  const rain = f.rain_percentage ?? 0;
+                  return (
+                    <div
+                      key={f.time_offset}
+                      className="flex flex-col items-center justify-between w-10 h-14 shrink-0 py-1 min-w-0"
+                      title={`${meta.label}${rain > 0 ? ` · 降雨 ${rain}%` : ''} · +${Math.round(f.time_offset)}min`}
+                    >
+                      <span className={`text-2xl ${meta.color} leading-none`}>{meta.icon}</span>
+                      <span className={`text-[10px] leading-none ${rain > 0 ? 'text-blue-400' : 'text-gray-600'}`}>
+                        {rain > 0 ? `${rain}%` : '·'}
+                      </span>
+                      <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
+            <button
+              onClick={weatherNav.next}
+              disabled={!weatherNav.canNext}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronRight className="w-3 h-3" />
+            </button>
           </div>
+          </div>}
 
-          {/* 空气温度 */}
-          <div className="bg-f1-dark rounded-lg p-3">
-            <div className="text-xs text-gray-400 mb-2">Air Temp</div>
-            <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
-              <span className="text-sm text-white font-mono">
-                {formatTemperature(session.air_temperature || 0)}
-              </span>
-              {airTempChanges.map((f) => (
-                <span key={f.time_offset} className="text-xs font-mono text-gray-300">
-                  - {formatTemperature(f.air_temperature)}
-                  <span className="text-[9px] text-gray-500"> +{Math.round(f.time_offset)}min</span>
-                </span>
-              ))}
+          {/* Track Temp 卡片 */}
+          {hasTrackTempChange && <div className="bg-f1-darker rounded-lg p-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide w-16 shrink-0">Track</div>
+            <div className="flex flex-col items-center justify-center w-11 h-14 shrink-0 py-1">
+              <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(currentTrackTemp)}</span>
             </div>
+            <button
+              onClick={trackNav.prev}
+              disabled={!trackNav.canPrev}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronLeft className="w-3 h-3" />
+            </button>
+            <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
+              {total === 0 ? (
+                <span className="text-[10px] text-gray-600">No forecast</span>
+              ) : (
+                tSamples.map((f) => (
+                  <div key={f.time_offset} className="flex flex-col items-center justify-center w-10 h-14 shrink-0 py-1 min-w-0">
+                    <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(f.track_temperature)}</span>
+                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <button
+              onClick={trackNav.next}
+              disabled={!trackNav.canNext}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronRight className="w-3 h-3" />
+            </button>
           </div>
+          </div>}
 
-          {/* 总圈数 */}
-          <div className="bg-f1-dark rounded-lg p-3">
-            <div className="text-xs text-gray-400 mb-2">Total Laps</div>
-            <span className="text-sm text-white font-mono">{session.total_laps || 0}</span>
+          {/* Air Temp 卡片 */}
+          {hasAirTempChange && <div className="bg-f1-darker rounded-lg p-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide w-16 shrink-0">Air</div>
+            <div className="flex flex-col items-center justify-center w-11 h-14 shrink-0 py-1">
+              <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(currentAirTemp)}</span>
+            </div>
+            <button
+              onClick={airNav.prev}
+              disabled={!airNav.canPrev}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronLeft className="w-3 h-3" />
+            </button>
+            <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
+              {total === 0 ? (
+                <span className="text-[10px] text-gray-600">No forecast</span>
+              ) : (
+                aSamples.map((f) => (
+                  <div key={f.time_offset} className="flex flex-col items-center justify-center w-10 h-14 shrink-0 py-1 min-w-0">
+                    <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(f.air_temperature)}</span>
+                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <button
+              onClick={airNav.next}
+              disabled={!airNav.canNext}
+              className="shrink-0 w-6 h-6 mx-1 flex items-center justify-center rounded bg-f1-dark text-gray-500 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed"
+            >
+              <BsChevronRight className="w-3 h-3" />
+            </button>
           </div>
+          </div>}
         </div>
+        }
 
         {/* Pit speed limit */}
         <div className="text-xs text-center text-gray-400 pt-2 border-t border-f1-gray">

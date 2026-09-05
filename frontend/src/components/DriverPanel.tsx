@@ -45,11 +45,14 @@ export const DriverPanel: React.FC = () => {
     );
   }
 
-  const drsColor = getDRSColor(playerCar.drs);
+  const drsIsOn = ['ON', 'ACTIVE'].includes(playerCar.drs?.toUpperCase() || '');
+  const drsIsAllowed = playerCar.drs_allowed?.toUpperCase() === 'ALLOWED';
+  const drsLabel = drsIsOn ? 'ON' : drsIsAllowed ? 'ENABLED / OFF' : 'DISABLED';
+  const drsColor = getDRSColor(playerCar.drs, playerCar.drs_allowed);
 
   // Format current lap time
   const formatCurrentLapTime = (ms: number | undefined): string => {
-    if (ms === undefined || ms === 0) return '--:--.---';
+    if (ms === undefined || ms === 0) return '-:--.---';
     const totalSeconds = ms / 1000;
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = Math.floor(totalSeconds % 60);
@@ -153,7 +156,7 @@ export const DriverPanel: React.FC = () => {
       <div className="mb-4 grid grid-cols-2 gap-4">
         <div className="bg-f1-darker rounded-lg p-3">
           <div className="text-xs text-gray-400 mb-1">CURRENT LAP</div>
-          <div className="text-xl font-mono font-bold text-race-green">
+          <div className="text-3xl font-mono font-bold text-race-green whitespace-nowrap">
             {formatCurrentLapTime(playerCar.current_lap_time_ms)}
           </div>
           {liveDelta !== null && (
@@ -165,9 +168,9 @@ export const DriverPanel: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="bg-f1-darker rounded-lg p-3">
+        <div className="bg-f1-darker rounded-lg p-3 min-w-0">
           <div className="text-xs text-gray-400 mb-1">CURRENT SECTOR</div>
-          <div className="text-lg font-bold text-white mb-2">
+          <div className="text-lg font-bold text-white mb-2 whitespace-nowrap">
             S{currentSector}
           </div>
           {/* Show sector times with live deltas */}
@@ -208,38 +211,38 @@ export const DriverPanel: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-2 gap-6">
-        {/* Speed and RPM Gauges */}
-        <div className="col-span-2 flex items-center justify-around gap-6">
+        {/* Speed + Gear + RPM in one row, gear centered */}
+        <div className="col-span-2 flex items-end justify-center gap-3">
           <Gauge
             value={playerCar.speed || 0}
             max={350}
             label="SPEED"
             unit="km/h"
             color="#00D656"
-            size={110}
+            size={112}
+            valueClassName="text-3xl"
           />
+          <motion.div
+            key={playerCar.gear}
+            initial={{ scale: 1.15 }}
+            animate={{ scale: 1 }}
+            className="flex h-[132px] min-w-[80px] flex-col items-center text-center"
+          >
+            <div className="bg-f1-darker rounded-lg w-20 h-20 flex items-center justify-center mt-4">
+              <div className="text-4xl font-bold text-white leading-none">
+                {playerCar.gear === -1 ? 'R' : playerCar.gear === 0 ? 'N' : playerCar.gear}
+              </div>
+            </div>
+            <div className="mt-auto text-sm text-gray-400">GEAR</div>
+          </motion.div>
           <Gauge
             value={playerCar.rpm || 0}
             max={playerCar.max_rpm || 15000}
             label="RPM"
             color="#FF3838"
-            size={110}
+            size={112}
+            valueClassName="text-2xl"
           />
-        </div>
-
-        {/* Gear Display */}
-        <div className="col-span-2 flex justify-center">
-          <motion.div
-            key={playerCar.gear}
-            initial={{ scale: 1.2 }}
-            animate={{ scale: 1 }}
-            className="bg-f1-darker rounded-lg p-6 text-center min-w-[120px]"
-          >
-            <div className="text-xs text-gray-400 mb-2">GEAR</div>
-            <div className="text-6xl font-bold text-white">
-              {playerCar.gear === -1 ? 'R' : playerCar.gear === 0 ? 'N' : playerCar.gear}
-            </div>
-          </motion.div>
         </div>
 
         {/* Input Bars */}
@@ -300,19 +303,22 @@ export const DriverPanel: React.FC = () => {
         {/* DRS Status */}
         <div className="col-span-1">
           <div
-            className="rounded-lg p-3 text-center"
-            style={{ backgroundColor: `${drsColor}22`, borderColor: drsColor }}
+            className="flex h-20 flex-col justify-center rounded-lg border-2 p-3 text-center"
+            style={{
+              backgroundColor: `${drsColor}22`,
+              borderColor: drsIsAllowed ? '#00D656' : 'transparent',
+            }}
           >
             <div className="text-xs text-gray-400 mb-1">DRS</div>
             <div className="text-sm font-bold" style={{ color: drsColor }}>
-              {playerCar.drs?.replace('_', ' ') || 'N/A'}
+              {drsLabel}
             </div>
           </div>
         </div>
 
         {/* ERS Mode */}
         <div className="col-span-1">
-          <div className="bg-f1-darker rounded-lg p-3 text-center">
+          <div className="flex h-20 flex-col justify-center rounded-lg border-2 border-transparent bg-f1-darker p-3 text-center">
             <div className="text-xs text-gray-400 mb-1">ERS MODE</div>
             <div className="text-sm font-bold text-yellow-400">
               {playerCar.ers_deploy_mode || 'NONE'}

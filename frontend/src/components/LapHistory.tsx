@@ -11,6 +11,9 @@ export const LapHistory: React.FC = () => {
   const bestSectors = useTelemetryStore((state) => state.best_sectors);
   const [clearing, setClearing] = React.useState(false);
 
+  // 防御: 后端清空时可能广播非数组, 统一当空数组处理
+  const history = Array.isArray(lapHistory) ? lapHistory : [];
+
   const clearLapHistory = async () => {
     try {
       setClearing(true);
@@ -20,9 +23,9 @@ export const LapHistory: React.FC = () => {
     }
   };
 
-  if (lapHistory.length === 0) {
+  if (history.length === 0) {
     return (
-      <div className="bg-f1-dark rounded-lg p-4 shadow-lg h-full">
+      <div className="bg-f1-dark rounded-lg p-4 shadow-lg h-full min-h-0">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-white">Lap History</h2>
           <button onClick={clearLapHistory} disabled={clearing} className="text-gray-400 hover:text-white disabled:opacity-50">
@@ -35,7 +38,7 @@ export const LapHistory: React.FC = () => {
   }
 
   // Find best lap
-  const bestLapTime = Math.min(...lapHistory.map(l => l.time_ms).filter(t => t > 0));
+  const bestLapTime = Math.min(...history.map(l => l.time_ms).filter(t => t > 0));
 
   // Get sector color (purple = personal best, green = good, yellow = ok, red = slow)
   const getSectorColor = (sectorTime: number, sectorIndex: number): string => {
@@ -51,7 +54,7 @@ export const LapHistory: React.FC = () => {
   };
 
   return (
-    <div className="bg-f1-dark rounded-lg p-4 shadow-lg h-full flex flex-col">
+    <div className="bg-f1-dark rounded-lg p-4 shadow-lg flex flex-col h-full min-h-0">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-white">Lap History</h2>
         <button onClick={clearLapHistory} disabled={clearing} className="text-gray-400 hover:text-white disabled:opacity-50">
@@ -59,11 +62,11 @@ export const LapHistory: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
         <div className="space-y-2">
-          {[...lapHistory].reverse().map((lap, idx) => {
+          {[...history].reverse().map((lap, idx) => {
             const isBestLap = lap.time_ms === bestLapTime && lap.time_ms > 0;
-            const prevLap = idx < lapHistory.length - 1 ? lapHistory[lapHistory.length - idx - 2] : null;
+            const prevLap = idx < history.length - 1 ? history[history.length - idx - 2] : null;
             const timeDiff = prevLap && lap.time_ms > 0 && prevLap.time_ms > 0
               ? lap.time_ms - prevLap.time_ms
               : 0;
@@ -138,7 +141,7 @@ export const LapHistory: React.FC = () => {
           </div>
           <div>
             <div className="text-gray-400 text-xs">TOTAL LAPS</div>
-            <div className="text-white font-bold">{lapHistory.length}</div>
+            <div className="text-white font-bold">{history.length}</div>
           </div>
         </div>
       </div>

@@ -10,6 +10,8 @@
 import { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { resolveTrackSvg } from '@/utils/trackSvgMap';
+import { getDriverCode } from '@/utils/driverCodes';
+import { Minus, Plus, RotateCcw } from 'lucide-react';
 
 interface CarDot {
   carIdx: number;
@@ -17,6 +19,8 @@ interface CarDot {
   y: number;
   position: number;
   isPlayer: boolean;
+  driverCode: string;
+  team: string;
 }
 
 /**
@@ -33,19 +37,54 @@ function normalizeSvg(text: string): string {
       if (!/viewBox/.test(a)) {
         a += ' viewBox="0 0 500 500"';
       }
+      if (/\sclass="/.test(a)) {
+        a = a.replace(/class="([^"]*)"/, 'class="$1 track-art"');
+      } else {
+        a += ' class="track-art"';
+      }
       a = a.replace(/\s+width="[^"]*"/, ' width="100%"').replace(/\s+height="[^"]*"/, ' height="100%"');
       return `<svg${a}>`;
     })
     // 赛道外观: 深灰 #3a3a44 (与 #0D0D14 底色区分), 描边压到 4 (原 20)
-    .replace(/<\/svg>/, '<style>path{stroke:#3a3a44 !important;stroke-width:4 !important}</style></svg>');
+    .replace(/<\/svg>/, `<style>svg.track-art > path{stroke:#3a3a44 !important;stroke-width:4 !important}</style></svg>`);
 }
 
-function dotColor(isPlayer: boolean, position: number): string {
-  if (isPlayer) return '#E10600';
-  if (position === 1) return '#FFD700';
-  if (position <= 3) return '#00D656';
-  if (position <= 10) return '#4A90E2';
-  return '#888888';
+function findPathFraction(path: SVGPathElement, targetX: number, targetY: number): number {
+  const totalLength = path.getTotalLength();
+  let closestFraction = 0;
+  let closestDistance = Infinity;
+
+  // The detailed Yas Marina SVG places its start/finish marker at this point.
+  for (let step = 0; step <= 1000; step += 1) {
+    const fraction = step / 1000;
+    const point = path.getPointAtLength(fraction * totalLength);
+    const distance = (point.x - targetX) ** 2 + (point.y - targetY) ** 2;
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestFraction = fraction;
+    }
+  }
+
+  return closestFraction;
+}
+
+const SILVERSTONE_START_FRACTION = 0.936;
+
+const TEAM_COLORS: Record<string, string> = {
+  'Red Bull Racing': '#3671C6',
+  Ferrari: '#E8002D',
+  Mercedes: '#27F4D2',
+  McLaren: '#FF8000',
+  'Aston Martin': '#229971',
+  Alpine: '#0093CC',
+  Williams: '#64C4FF',
+  RB: '#6692FF',
+  Sauber: '#52E252',
+  Haas: '#B6BABD',
+};
+
+function dotColor(team: string | undefined): string {
+  return TEAM_COLORS[team || ''] || '#888888';
 }
 
 export const TrackMap: React.FC = () => {
@@ -55,12 +94,20 @@ export const TrackMap: React.FC = () => {
   const cars = useTelemetryStore((state) => state.cars);
   const session = useTelemetryStore((state) => state.session);
   const playerCarIndex = useTelemetryStore((state) => state.playerCarIndex);
+  const participants = useTelemetryStore((state) => state.participants);
+  const highlightedCarIndex = useTelemetryStore((state) => state.highlighted_car_index);
 
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [carDots, setCarDots] = useState<CarDot[]>([]);
+  const [hoveredCarIdx, setHoveredCarIdx] = useState<number | null>(null);
+  const [mapZoom, setMapZoom] = useState(1);
+  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const abuDhabiStartFractionRef = useRef<number | null>(null);
 
   // Resolve + fetch the track SVG whenever the session track changes.
   useEffect(() => {
+    abuDhabiStartFractionRef.current = null;
     const file = resolveTrackSvg(session?.track_id);
     if (!file) {
       setSvgContent(null);
@@ -93,7 +140,15 @@ export const TrackMap: React.FC = () => {
     const totalLength = path.getTotalLength();
     if (!totalLength) return;
 
+    const trackSvg = resolveTrackSvg(session?.track_id);
     const trackLength = session?.track_length ?? 0;
+    const isYasMarina = trackSvg === 'yas-marina-2';
+    if (isYasMarina && abuDhabiStartFractionRef.current === null) {
+      abuDhabiStartFractionRef.current = findPathFraction(path, 228, 280);
+    }
+    const startFraction = isYasMarina
+      ? (abuDhabiStartFractionRef.current ?? 0)
+      : trackSvg === 'silverstone-8' ? SILVERSTONE_START_FRACTION : 0;
     const dots: CarDot[] = [];
 
     Object.entries(cars).forEach(([idx, car]) => {
@@ -102,7 +157,8 @@ export const TrackMap: React.FC = () => {
       // Normalize lap progress to [0, 1) around the track.
       const denom = trackLength > 0 ? trackLength : 1;
       const progress = ((lapDistance % denom) + denom) % denom;
-      const fraction = trackLength > 0 ? progress / denom : 0;
+      const lapFraction = trackLength > 0 ? progress / denom : 0;
+      const fraction = (startFraction + lapFraction) % 1;
       const pt = path.getPointAtLength(fraction * totalLength);
 
       dots.push({
@@ -111,11 +167,13 @@ export const TrackMap: React.FC = () => {
         y: pt.y,
         position: car.position ?? 0,
         isPlayer: playerCarIndex !== null && carIdx === playerCarIndex,
+        driverCode: getDriverCode(participants[carIdx]),
+        team: participants[carIdx]?.team_id,
       });
     });
 
     setCarDots(dots);
-  }, [svgContent, cars, session?.track_length, playerCarIndex]);
+  }, [svgContent, cars, participants, session?.track_length, playerCarIndex]);
 
   // Fallback: draw on canvas when no track SVG is available.
   useEffect(() => {
@@ -164,7 +222,7 @@ export const TrackMap: React.FC = () => {
 
         ctx.beginPath();
         ctx.arc(x, y, isPlayerCar ? 10 : 7, 0, Math.PI * 2);
-        ctx.fillStyle = dotColor(isPlayerCar, car.position || 0);
+        ctx.fillStyle = dotColor(participants[carIdx]?.team_id);
         ctx.fill();
 
         if (isPlayerCar) {
@@ -226,7 +284,7 @@ export const TrackMap: React.FC = () => {
 
       ctx.beginPath();
       ctx.arc(x, y, isPlayerCar ? 8 : 6, 0, Math.PI * 2);
-      ctx.fillStyle = dotColor(isPlayerCar, pos.position);
+      ctx.fillStyle = dotColor(participants[pos.car_index]?.team_id);
       ctx.fill();
 
       if (isPlayerCar) {
@@ -247,6 +305,30 @@ export const TrackMap: React.FC = () => {
     ? session.track_id.replace(/_/g, ' ')
     : 'Unknown Track';
 
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (mapZoom <= 1) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: mapOffset.x,
+      offsetY: mapOffset.y,
+    };
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    setMapOffset({
+      x: dragRef.current.offsetX + event.clientX - dragRef.current.x,
+      y: dragRef.current.offsetY + event.clientY - dragRef.current.y,
+    });
+  };
+
+  const resetMapView = () => {
+    setMapZoom(1);
+    setMapOffset({ x: 0, y: 0 });
+  };
+
   return (
     <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
       <div className="flex items-center justify-between mb-4">
@@ -258,32 +340,75 @@ export const TrackMap: React.FC = () => {
         {svgContent ? (
           <div
             ref={svgContainerRef}
-            className="relative aspect-square w-full rounded-lg border border-f1-gray overflow-hidden bg-[#0D0D14]"
+            className="relative mx-auto aspect-square w-full max-w-[380px] cursor-grab overflow-hidden rounded-lg border border-f1-gray bg-[#0D0D14] active:cursor-grabbing"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={() => { dragRef.current = null; }}
+            onPointerCancel={() => { dragRef.current = null; }}
           >
-            <div className="absolute inset-0" dangerouslySetInnerHTML={{ __html: svgContent }} />
-            {carDots.map((dot) => (
-              <div
-                key={dot.carIdx}
-                title={`P${dot.position || '?'}`}
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full pointer-events-none"
-                style={{
-                  left: `${(dot.x / 500) * 100}%`,
-                  top: `${(dot.y / 500) * 100}%`,
-                  width: dot.isPlayer ? 24 : 16,
-                  height: dot.isPlayer ? 24 : 16,
-                  backgroundColor: dotColor(dot.isPlayer, dot.position),
-                  border: dot.isPlayer ? '2.5px solid #FFFFFF' : '1.5px solid rgba(13,13,20,0.85)',
-                  boxShadow: dot.isPlayer ? '0 0 12px 3px rgba(225,6,0,0.85)' : 'none',
-                }}
-              />
-            ))}
+            <div
+              className="absolute inset-0 z-0"
+              style={{ transform: `translate(${mapOffset.x}px, ${mapOffset.y}px) scale(${mapZoom})`, transformOrigin: 'center' }}
+            >
+              <div className="absolute inset-0" dangerouslySetInnerHTML={{ __html: svgContent }} />
+              {carDots.map((dot) => (
+                <div
+                  key={dot.carIdx}
+                  className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full ${
+                    dot.isPlayer ? 'z-20' : dot.carIdx === hoveredCarIdx ? 'z-30' : 'z-10'
+                  }`}
+                  onMouseEnter={() => setHoveredCarIdx(dot.carIdx)}
+                  onMouseLeave={() => setHoveredCarIdx(null)}
+                  style={{
+                    left: `${(dot.x / 500) * 100}%`,
+                    top: `${(dot.y / 500) * 100}%`,
+                    width: dot.isPlayer ? 24 : dot.carIdx === highlightedCarIndex ? 24 : 16,
+                    height: dot.isPlayer ? 24 : dot.carIdx === highlightedCarIndex ? 24 : 16,
+                    backgroundColor: dotColor(dot.team),
+                    border: dot.isPlayer ? '2.5px solid #FFFFFF' : '1.5px solid rgba(13,13,20,0.85)',
+                    boxShadow: dot.isPlayer
+                      ? '0 0 12px 3px rgba(225,6,0,0.85)'
+                      : dot.carIdx === highlightedCarIndex
+                      ? '0 0 12px 3px rgba(255,215,0,0.8)'
+                      : 'none',
+                  }}
+                >
+                  {hoveredCarIdx === dot.carIdx && (
+                    <div
+                      className={`pointer-events-none absolute z-40 whitespace-nowrap rounded border border-white/15 bg-f1-dark/95 px-2 py-1 font-mono text-xs font-bold text-race-green ${
+                        dot.x < 70
+                          ? 'left-0'
+                          : dot.x > 430
+                          ? 'right-0'
+                          : 'left-1/2 -translate-x-1/2'
+                      } ${
+                        dot.y < 75
+                          ? 'top-full mt-1'
+                          : 'bottom-full mb-1'
+                      }`}
+                    >
+                      {dot.driverCode} · P{dot.position || '?'}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div
+              className="absolute right-2 top-2 z-20 flex gap-1 rounded bg-f1-dark/90 p-1"
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerMove={(event) => event.stopPropagation()}
+            >
+              <button type="button" onClick={() => setMapZoom((value) => Math.min(3, value + 0.25))} className="p-1 text-gray-300 hover:text-white" title="Zoom in" aria-label="Zoom in"><Plus className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setMapZoom((value) => Math.max(1, value - 0.25))} className="p-1 text-gray-300 hover:text-white" title="Zoom out" aria-label="Zoom out"><Minus className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={resetMapView} className="p-1 text-gray-300 hover:text-white" title="Reset map view" aria-label="Reset map view"><RotateCcw className="h-3.5 w-3.5" /></button>
+            </div>
           </div>
         ) : (
           <canvas
             ref={canvasRef}
             width={400}
             height={400}
-            className="w-full rounded-lg border border-f1-gray"
+            className="w-full max-w-[380px] mx-auto rounded-lg border border-f1-gray"
           />
         )}
 
@@ -294,29 +419,6 @@ export const TrackMap: React.FC = () => {
         )}
       </div>
 
-      {/* Legend */}
-      <div className="mt-3 flex justify-around text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full bg-[#E10600] border-2 border-white shadow-[0_0_8px_rgba(225,6,0,0.9)]"></div>
-          <span className="text-gray-400">You</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#FFD700]"></div>
-          <span className="text-gray-400">P1</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#00D656]"></div>
-          <span className="text-gray-400">P2-3</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#4A90E2]"></div>
-          <span className="text-gray-400">P4-10</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#888888]"></div>
-          <span className="text-gray-400">P11+</span>
-        </div>
-      </div>
     </div>
   );
 };

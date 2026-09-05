@@ -10,6 +10,7 @@ interface GaugeProps {
   unit?: string;
   color?: string;
   size?: number;
+  valueClassName?: string;
 }
 
 export const Gauge: React.FC<GaugeProps> = ({
@@ -19,6 +20,7 @@ export const Gauge: React.FC<GaugeProps> = ({
   unit = '',
   color = '#00D656',
   size = 120,
+  valueClassName = 'text-3xl',
 }) => {
   const percentage = Math.min((value / max) * 100, 100);
 
@@ -28,7 +30,7 @@ export const Gauge: React.FC<GaugeProps> = ({
   const strokeDashoffset = strokeDasharray - (percentage / 100) * strokeDasharray;
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="relative flex flex-col items-center" style={{ width: size }}>
       <svg width={size} height={size} className="transform -rotate-90">
         {/* Background arc */}
         <circle
@@ -58,9 +60,12 @@ export const Gauge: React.FC<GaugeProps> = ({
           }}
         />
       </svg>
-      <div className="absolute flex flex-col items-center justify-center" style={{ marginTop: size / 2 - 30 }}>
-        <div className="text-3xl font-bold text-white">{Math.round(value)}</div>
-        {unit && <div className="text-xs text-gray-400 mt-1">{unit}</div>}
+      <div
+        className="absolute left-0 top-0 flex flex-col items-center justify-center"
+        style={{ width: size, height: size }}
+      >
+        <div className={`${valueClassName} font-bold text-white`}>{Math.round(value)}</div>
+        {unit && <div className="text-xs text-gray-400 mt-0 leading-none">{unit}</div>}
       </div>
       <div className="text-sm text-gray-400 mt-2">{label}</div>
     </div>

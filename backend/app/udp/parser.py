@@ -126,17 +126,16 @@ class F1TelemetryParser:
                     zone_flag=_enum(FlagType, zone_values[1])
                 ))
 
-        # Safety car status, network game, forecast count, accuracy, AI difficulty
-        v, offset = F1TelemetryParser._read(data, offset, '<BBBBB')
+        # Safety car status, network game, forecast sample count
+        # (F1 24 spec: forecastAccuracy + aiDifficulty come AFTER the samples)
+        v, offset = F1TelemetryParser._read(data, offset, '<BBB')
         safety_car_status = v[0]
         network_game = bool(v[1])
         num_weather_forecast_samples = v[2]
-        forecast_accuracy = v[3]
-        ai_difficulty = v[4]
 
-        # Weather forecast samples (fixed 56 slots, only first N valid)
+        # Weather forecast samples (fixed 64 slots in F1 24, only first N valid)
         weather_forecast_samples = []
-        for _ in range(56):
+        for _ in range(64):
             if offset + 8 > len(data):
                 break
             fv, offset = F1TelemetryParser._read(data, offset, WEATHER_FORECAST_FMT)
@@ -152,41 +151,48 @@ class F1TelemetryParser:
                     rain_percentage=fv[7]
                 ))
 
-        # Additional session info (33 bytes fixed region: 3xI + 25x B)
-        tail = list(struct.unpack_from('<III', data, offset))
-        offset += 12
-        assist_bytes = list(struct.unpack_from('<' + 'B' * 21, data, offset))
-        offset += 21
+        # Forecast accuracy & AI difficulty come AFTER the samples in F1 24 spec
+        v, offset = F1TelemetryParser._read(data, offset, '<BB')
+        forecast_accuracy = v[0]
+        ai_difficulty = v[1]
 
-        # remaining session tail fields (F1 24 spec additions)
-        season_link_identifier = tail[0]
-        weekend_link_identifier = tail[1]
-        session_link_identifier = tail[2]
-        pit_stop_window_ideal_lap = assist_bytes[0]
-        pit_stop_window_latest_lap = assist_bytes[1]
-        pit_stop_rejoin_position = assist_bytes[2]
-        steering_assist = bool(assist_bytes[3])
-        braking_assist = assist_bytes[4]
-        gearbox_assist = assist_bytes[5]
-        pit_assist = bool(assist_bytes[6])
-        pit_release_assist = bool(assist_bytes[7])
-        ers_assist = bool(assist_bytes[8])
-        drs_assist = bool(assist_bytes[9])
-        dynamic_racing_line = assist_bytes[10]
-        dynamic_racing_line_type = assist_bytes[11]
-        game_mode = assist_bytes[12]
-        rule_set = assist_bytes[13]
+        # Session link identifiers (3x uint32)
+        v, offset = F1TelemetryParser._read(data, offset, '<III')
+        season_link_identifier = v[0]
+        weekend_link_identifier = v[1]
+        session_link_identifier = v[2]
+
+        # Pit window + driver assist settings (14 bytes)
+        v, offset = F1TelemetryParser._read(data, offset, '<' + 'B' * 14)
+        pit_stop_window_ideal_lap = v[0]
+        pit_stop_window_latest_lap = v[1]
+        pit_stop_rejoin_position = v[2]
+        steering_assist = bool(v[3])
+        braking_assist = v[4]
+        gearbox_assist = v[5]
+        pit_assist = bool(v[6])
+        pit_release_assist = bool(v[7])
+        ers_assist = bool(v[8])
+        drs_assist = bool(v[9])
+        dynamic_racing_line = v[10]
+        dynamic_racing_line_type = v[11]
+        game_mode = v[12]
+        rule_set = v[13]
+
+        # Time of day (minutes since midnight)
         time_of_day = struct.unpack_from('<I', data, offset)[0]
         offset += 4
-        session_length = assist_bytes[14]
-        speed_units_lead_player = assist_bytes[15]
-        temperature_units_lead_player = assist_bytes[16]
-        speed_units_secondary_player = assist_bytes[17]
-        temperature_units_secondary_player = assist_bytes[18]
-        num_safety_car_periods = assist_bytes[19]
-        num_virtual_safety_car_periods = assist_bytes[20]
-        # red flag periods byte follows after time_of_day in spec; read defensively
-        num_red_flag_periods = struct.unpack_from('<B', data, offset)[0] if offset < len(data) else 0
+
+        # Session settings tail (8 bytes)
+        v, offset = F1TelemetryParser._read(data, offset, '<' + 'B' * 8)
+        session_length = v[0]
+        speed_units_lead_player = v[1]
+        temperature_units_lead_player = v[2]
+        speed_units_secondary_player = v[3]
+        temperature_units_secondary_player = v[4]
+        num_safety_car_periods = v[5]
+        num_virtual_safety_car_periods = v[6]
+        num_red_flag_periods = v[7]
 
         return PacketSessionData(
             header=header,
@@ -326,8 +332,9 @@ class F1TelemetryParser:
             v = struct.unpack_from('<B', data, offset)
             event_details = Retirement(vehicle_idx=v[0])
         elif event_string_code == 'DRSE':
-            v = struct.unpack_from('<B', data, offset)
-            event_details = Retirement(vehicle_idx=v[0])  # reuse structure
+            event_details = None
+        elif event_string_code == 'DRSD':
+            event_details = None
         elif event_string_code == 'TMPT':
             v = struct.unpack_from('<B', data, offset)
             event_details = TeamMateInPits(vehicle_idx=v[0])
@@ -384,6 +391,11 @@ class F1TelemetryParser:
         elif event_string_code == 'CSVC':
             v = struct.unpack_from('<B', data, offset)
             event_details = StartLights(num_lights=v[0])
+        elif event_string_code == 'RDFL':
+            event_details = None
+        elif event_string_code == 'SCAR':
+            v = struct.unpack_from('<BB', data, offset)
+            event_details = SafetyCarEvent(safety_car_type=v[0], event_type=v[1])
         elif event_string_code == 'COLL':
             v = struct.unpack_from('<BB', data, offset)
             event_details = Overtake(overtaking_vehicle_idx=v[0], being_overtaken_vehicle_idx=v[1])
@@ -852,5 +864,7 @@ class F1TelemetryParser:
         except Exception as e:
             from .lograte import log_limited
             packet_type = getattr(header, 'packet_type', '?')
-            log_limited(f"parse_err_{packet_type}", f"Error parsing packet type {packet_type}: {e}")
+            import traceback
+            traceback.print_exc()
+            log_limited(f"parse_err_{packet_type}", f"Error parsing packet type {packet_type} len={len(data)}: {e}")
             return None

@@ -1,3 +1,5 @@
+import { wsBaseUrl } from './backend';
+
 /**
  * WebSocket service for real-time telemetry updates
  */
@@ -13,7 +15,7 @@ export class TelemetryWebSocket {
   private messageHandlers: Set<MessageHandler> = new Set();
   private isIntentionallyClosed: boolean = false;
 
-  constructor(url: string = 'ws://localhost:8000/ws') {
+  constructor(url: string = `${wsBaseUrl()}/ws`) {
     this.url = url;
   }
 

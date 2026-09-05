@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { Trophy, Calendar, Flag, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { apiBaseUrl } from '@/services/backend';
 
 interface RaceSummary {
   id: string;
@@ -29,7 +30,7 @@ export const RaceHistory: React.FC<RaceHistoryProps> = ({ onSelectRace }) => {
 
   const loadRaces = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/races');
+      const response = await fetch(`${apiBaseUrl()}/api/races`);
       const data = await response.json();
       setRaces(data.races || []);
     } catch (error) {

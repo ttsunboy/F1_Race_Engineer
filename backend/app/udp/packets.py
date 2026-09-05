@@ -260,6 +260,13 @@ class StopGoPenaltyServed:
 
 
 @dataclass
+class SafetyCarEvent:
+    """Safety car event data"""
+    safety_car_type: int
+    event_type: int
+
+
+@dataclass
 class Flashback:
     """Flashback event data"""
     flashback_frame_identifier: int

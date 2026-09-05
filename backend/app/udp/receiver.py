@@ -118,10 +118,11 @@ class UDPTelemetryReceiver:
 
             if packet is None:
                 self.stats["parse_errors"] += 1
-                if len(data) >= 6:
-                    ptype = data[5]
+                # F1 24: header packetType lives at byte 6 (byte 5 is packetVersion)
+                if len(data) >= 7:
+                    ptype = data[6]
                     self.stats["errors_by_type"][ptype] = self.stats["errors_by_type"].get(ptype, 0) + 1
-                    log_limited(f"drop_{ptype}", f"Dropped unparseable packet type {ptype}")
+                    log_limited(f"drop_{ptype}", f"Dropped unparseable packet type {ptype} len={len(data)}")
                 return
 
             # Get packet ID from header

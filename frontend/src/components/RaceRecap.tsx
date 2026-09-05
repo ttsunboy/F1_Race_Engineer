@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Trophy, Award, TrendingUp, X, Calendar, MapPin, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatLapTime } from '@/utils/formatting';
+import { apiBaseUrl } from '@/services/backend';
 
 interface RaceResult {
   position: number;
@@ -57,7 +58,7 @@ export const RaceRecap: React.FC<RaceRecapProps> = ({ raceId, onClose }) => {
 
   const loadRecap = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/races/${raceId}`);
+      const response = await fetch(`${apiBaseUrl()}/api/races/${raceId}`);
       const data = await response.json();
       setRecap(data);
     } catch (error) {

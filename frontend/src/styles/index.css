@@ -21,6 +21,39 @@
   }
 }
 
+/* Live timing fills its column while reserving enough room for Red Bull Racing. */
+.timing-grid {
+  display: grid;
+  grid-template-columns: 26px 42px minmax(118px, 1.5fr) minmax(70px, 1fr) repeat(3, minmax(42px, 0.75fr)) repeat(2, minmax(58px, 1fr)) 28px 22px;
+  width: 100%;
+}
+
+.timing-table {
+  width: 100%;
+}
+
+.dashboard-card-fill > div {
+  height: 100%;
+}
+
+@media (min-width: 1536px) {
+  .timing-header {
+    font-size: 0.75rem;
+  }
+
+  .timing-row {
+    font-size: 0.875rem;
+  }
+
+  .timing-row .text-\[10px\] {
+    font-size: 0.75rem;
+  }
+
+  .timing-row .text-\[11px\] {
+    font-size: 0.8125rem;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
