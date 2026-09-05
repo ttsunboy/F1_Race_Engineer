@@ -4,8 +4,8 @@
   "private": true,
   "description": "F1 24 Telemetry Dashboard - Real-time race engineering console",
   "scripts": {
-    "dev": "set ESBUILD_BINARY_PATH=node_modules\\.esbuild-bin\\esbuild.exe&& vite",
-    "build": "set ESBUILD_BINARY_PATH=node_modules\\.esbuild-bin\\esbuild.exe&& tsc && vite build",
+    "dev": "vite",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
