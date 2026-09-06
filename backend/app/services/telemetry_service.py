@@ -565,10 +565,11 @@ class TelemetryService:
                             if self.current_state["best_sectors"][idx]["s3"] is None or s3_time < self.current_state["best_sectors"][idx]["s3"]:
                                 self.current_state["best_sectors"][idx]["s3"] = s3_time
 
+                        # Broadcast full best_sectors map so timing tower can color ANY car's sectors
+                        await self._broadcast_update("best_sectors", self.current_state["best_sectors"])
+
                         # Broadcast player history/sectors once per completed lap (not per packet)
                         if idx == self.current_state.get("player_car_index"):
-                            if idx in self.current_state["best_sectors"]:
-                                await self._broadcast_update("best_sectors", self.current_state["best_sectors"][idx])
                             if idx in self.current_state["lap_history"]:
                                 await self._broadcast_update("lap_history", self.current_state["lap_history"][idx])
                             if idx in self.current_state["starting_grid"]:
@@ -616,6 +617,21 @@ class TelemetryService:
 
                 # Add to timing tower
                 if idx in self.current_state["participants"]:
+                    # Compute per-car sector performance colors (backend-side, vs that car's best)
+                    bs = self.current_state["best_sectors"].get(idx, {})
+                    def _sector_color(t, best):
+                        if t is None or t <= 0 or not best or best <= 0:
+                            return None
+                        if t == best:
+                            return "purple"
+                        if t <= best * 1.02:
+                            return "green"
+                        if t <= best * 1.05:
+                            return "yellow"
+                        return "red"
+                    # S1/S2 are locked completed-sector values -> stable performance colors.
+                    # S3 is a live value that grows while in S3 -> color would jump; leave None
+                    # (S3 gets colored in Lap History where complete-lap data exists).
                     timing_data.append({
                         "position": car_position,
                         "car_index": idx,
@@ -626,7 +642,12 @@ class TelemetryService:
                         "gap_to_leader": self._format_time_delta(delta_to_leader_ms),
                         "interval": self._format_time_delta(delta_to_car_ahead_ms),
                         "pit_stops": num_pit_stops,
-                        "penalties": penalties
+                        "penalties": penalties,
+                        "sector_colors": {
+                            "s1": _sector_color(sector1_time_ms, bs.get("s1")),
+                            "s2": _sector_color(sector2_time_ms, bs.get("s2")),
+                            "s3": None,
+                        }
                     })
 
         # Sort by position

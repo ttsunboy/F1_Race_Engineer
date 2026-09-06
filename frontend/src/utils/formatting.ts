@@ -204,3 +204,15 @@ export const getTemperatureColor = (temp: number | undefined, optimal: { min: nu
   if (temp <= optimal.max + 40) return '#FF8C00'; // Hot (orange)
   return '#FF3838'; // Too hot (red)
 };
+
+/**
+ * Map backend sector performance color name to CSS color.
+ * purple = personal best, green = within 2%, yellow = within 5%, red = slower, null = no data.
+ */
+export const sectorColorName = (name: string | null | undefined): string => {
+  if (name === 'purple') return '#A020F0';
+  if (name === 'green') return '#00D656';
+  if (name === 'yellow') return '#FFD700';
+  if (name === 'red') return '#FF3838';
+  return '#888888'; // default gray
+};

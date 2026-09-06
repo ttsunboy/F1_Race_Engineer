@@ -131,6 +131,11 @@ export interface TimingData {
   interval: string;
   pit_stops: number;
   penalties: number;
+  sector_colors?: {
+    s1: string | null;
+    s2: string | null;
+    s3: string | null;
+  };
 }
 
 export interface CarPosition {

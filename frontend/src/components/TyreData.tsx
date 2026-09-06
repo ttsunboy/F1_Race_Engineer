@@ -64,7 +64,6 @@ const Tyre: React.FC<TyreProps> = ({ position, surfaceTemp, innerTemp, pressure,
       <div className="mt-2 text-sm text-center space-y-1">
         <div className="text-white font-mono text-base">{formatTemperature(surfaceTemp)}</div>
         <div className="text-gray-400 font-mono text-xs">{formatPressure(pressure)}</div>
-        <div className="text-gray-500 text-xs">{wearPercent.toFixed(0)}% wear</div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
-import { formatLapTime, getTyreCompoundColor } from '@/utils/formatting';
+import { formatLapTime, getTyreCompoundColor, sectorColorName } from '@/utils/formatting';
 import { motion } from 'framer-motion';
 import { getDriverCode } from '@/utils/driverCodes';
 
@@ -137,21 +137,29 @@ export const TimingTower: React.FC = () => {
 
                 {/* S1 */}
                 <div className="flex items-center justify-end font-mono text-[10px]">
-                  <span className={`whitespace-nowrap ${currentS === 0 ? (isPlayer ? 'text-white font-bold' : 'text-yellow-400 font-bold') : 'text-gray-400'}`}>
+                  <span
+                    className={`whitespace-nowrap ${currentS === 0 ? 'font-bold' : ''}`}
+                    style={{ color: sectorColorName(entry.sector_colors?.s1) }}
+                  >
                     {s1}
                   </span>
                 </div>
 
                 {/* S2 */}
                 <div className="flex items-center justify-end font-mono text-[10px]">
-                  <span className={`whitespace-nowrap ${currentS === 1 ? (isPlayer ? 'text-white font-bold' : 'text-yellow-400 font-bold') : 'text-gray-400'}`}>
+                  <span
+                    className={`whitespace-nowrap ${currentS === 1 ? 'font-bold' : ''}`}
+                    style={{ color: sectorColorName(entry.sector_colors?.s2) }}
+                  >
                     {s2}
                   </span>
                 </div>
 
                 {/* S3 */}
                 <div className="flex items-center justify-end font-mono text-[10px]">
-                  <span className={`whitespace-nowrap ${currentS === 2 ? (isPlayer ? 'text-white font-bold' : 'text-yellow-400 font-bold') : 'text-gray-400'}`}>
+                  <span
+                    className={`whitespace-nowrap ${currentS === 2 ? (isPlayer ? 'text-white font-bold' : 'text-yellow-400 font-bold') : 'text-gray-400'}`}
+                  >
                     {s3}
                   </span>
                 </div>

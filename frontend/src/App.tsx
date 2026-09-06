@@ -155,7 +155,7 @@ function App() {
         {/* Main Content */}
         <main className="container mx-auto min-h-0 flex-1 overflow-hidden px-4 py-4 max-w-[2400px]">
           {currentPage === 'dashboard' ? (
-            <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,14fr)_minmax(0,28fr)_minmax(0,14fr)_minmax(0,14fr)_minmax(0,30fr)]">
+            <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,14fr)_minmax(0,28fr)_minmax(0,14fr)_minmax(0,14fr)_minmax(0,30fr)]">
               {/* Left Column - Session & Delta */}
               <div className="flex h-full min-h-0 flex-col gap-4">
                 <SessionInfo />
@@ -182,7 +182,7 @@ function App() {
               </div>
 
               {/* Lap History Column */}
-              <div className="h-full">
+              <div className="h-full min-h-0">
                 <LapHistory />
               </div>
 
