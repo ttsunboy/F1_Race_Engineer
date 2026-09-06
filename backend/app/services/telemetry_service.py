@@ -243,6 +243,7 @@ class TelemetryService:
         self.current_state["session"] = {
             "session_uid": get_attr(header, 'session_uid', 'sessionUID', 'm_sessionUID', default=0),
             "session_time": get_attr(header, 'session_time', 'sessionTime', 'm_sessionTime', default=0),
+            "session_type_id": raw_session_type,
             "session_type": session_type,
             "track_id": track_id,
             "weather": format_enum(get_attr(packet, 'weather', 'm_weather'), WEATHER),
@@ -303,14 +304,25 @@ class TelemetryService:
 
     @staticmethod
     def _extract_forecast(packet):
-        """WeatherForecastSample 列表 -> 可序列化 dict 列表 (time_offset 单位是分钟，且只使用有效样本)."""
+        """WeatherForecastSample 列表 -> 可序列化 dict 列表。
+
+        Important findings from real captures:
+        - time_offset 的单位是分钟，不是秒
+        - sample 里还带有 session_type（P3 / Q1 / Q2 / Q3 / Race ...）
+        - 同一个 session packet 里会混入多个 future session 的 forecast
+
+        因此前端必须按 (session_type, time_offset) 解释这些 sample，而不能只按 time_offset 去重。
+        """
         raw = get_attr(packet, 'weather_forecast_samples', 'weatherForecastSamples',
                        'm_weatherForecastSamples', default=[])
         samples = []
         for f in raw:
             if f is None:
                 continue
+            raw_session_type = get_attr(f, 'session_type', 'sessionType', 'm_sessionType', default=0)
             samples.append({
+                "session_type_id": raw_session_type,
+                "session_type": format_enum(raw_session_type, SESSION_TYPES),
                 "time_offset": get_attr(f, 'time_offset', 'timeOffset', 'm_timeOffset', default=0),
                 "weather": format_enum(get_attr(f, 'weather', 'm_weather'), WEATHER),
                 "track_temperature": get_attr(f, 'track_temperature', 'trackTemperature', 'm_trackTemperature', default=0),

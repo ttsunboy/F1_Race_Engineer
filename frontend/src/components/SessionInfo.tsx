@@ -88,6 +88,115 @@ export const SessionInfo: React.FC = () => {
   const [trackTempIdx, setTrackTempIdx] = useState(0);
   const [airTempIdx, setAirTempIdx] = useState(0);
 
+  const sessionDuration = session?.session_duration || 0;
+  const timeLeft = session?.session_time_left || 0;
+  const canShowElapsed = sessionDuration > 0 && timeLeft >= 0 && timeLeft <= sessionDuration;
+  const elapsedTime = canShowElapsed ? Math.max(0, sessionDuration - timeLeft) : 0;
+  const minutes = Math.floor(elapsedTime / 60);
+  const seconds = elapsedTime % 60;
+
+  const status = STATUS_META[session?.safety_car_status ?? 0] ?? STATUS_META[0];
+
+  const currentSessionType = session?.session_type || '';
+  const currentSessionTypeId = session?.session_type_id;
+  const forecastSamples = session?.weather_forecast_samples ?? [];
+
+  // Real F1 24 packets can contain forecast rows for MULTIPLE session types
+  // (e.g. current P3 plus future Q1/Q2/Q3/Race). We only want to show the
+  // forecast for the CURRENT session here, and we should never render offset=0
+  // as a fake "+0min" forecast card.
+  const sameSessionForecast = forecastSamples.filter((sample) => {
+    if (!sample || !Number.isFinite(sample.time_offset)) return false;
+    if ((sample.time_offset ?? 0) <= 0) return false;
+
+    if (sample.session_type_id !== undefined && currentSessionTypeId !== undefined) {
+      return sample.session_type_id === currentSessionTypeId;
+    }
+    if (sample.session_type && currentSessionType) {
+      return sample.session_type === currentSessionType;
+    }
+    return false;
+  });
+
+  // Dedupe inside the SAME session by time offset only.
+  const samples = Object.values(
+    sameSessionForecast.reduce((acc, f) => {
+      acc[f.time_offset] = f;
+      return acc;
+    }, {} as Record<number, (typeof sameSessionForecast)[number]>)
+  ).sort((a, b) => a.time_offset - b.time_offset);
+
+  const currentWeather = session?.weather || '';
+  const currentTrackTemp = session?.track_temperature || 0;
+  const currentAirTemp = session?.air_temperature || 0;
+  const currentRain = forecastSamples.find((sample) => {
+    if (!sample) return false;
+    if (sample.session_type_id !== undefined && currentSessionTypeId !== undefined) {
+      return sample.session_type_id === currentSessionTypeId && sample.time_offset === 0;
+    }
+    if (sample.session_type && currentSessionType) {
+      return sample.session_type === currentSessionType && sample.time_offset === 0;
+    }
+    return false;
+  })?.rain_percentage ?? 0;
+
+  // Compress each forecast dimension independently.
+  const weatherSamples = samples.filter((sample, index) => {
+    const previous = index === 0
+      ? { weather: currentWeather, rain_percentage: currentRain }
+      : samples[index - 1];
+    return sample.weather !== previous.weather
+      || sample.rain_percentage !== previous.rain_percentage;
+  });
+  const trackSamplesOnly = samples.filter((sample, index) => {
+    const previousTrack = index === 0 ? currentTrackTemp : samples[index - 1].track_temperature;
+    return sample.track_temperature !== previousTrack;
+  });
+  const airSamplesOnly = samples.filter((sample, index) => {
+    const previousAir = index === 0 ? currentAirTemp : samples[index - 1].air_temperature;
+    return sample.air_temperature !== previousAir;
+  });
+
+  const hasWeatherChange = weatherSamples.length > 0;
+  const hasTrackTempChange = trackSamplesOnly.length > 0;
+  const hasAirTempChange = airSamplesOnly.length > 0;
+  const hasForecastChanges = hasWeatherChange || hasTrackTempChange || hasAirTempChange;
+
+  const windowStart = (idx: number, total: number) => (total ? Math.min(idx, total - 1) : 0);
+  const windowSamples = <T,>(items: T[], start: number) => items.slice(start, start + 1);
+
+  const makeNav = (idx: number, setIdx: (n: number) => void, total: number) => {
+    const maxStart = Math.max(0, total - 1);
+    return {
+      canPrev: total > 1 && idx > 0,
+      canNext: total > 1 && idx < maxStart,
+      prev: () => setIdx(Math.max(0, idx - 1)),
+      next: () => setIdx(Math.min(maxStart, idx + 1)),
+    };
+  };
+  const weatherNav = makeNav(weatherIdx, setWeatherIdx, weatherSamples.length);
+  const trackNav = makeNav(trackTempIdx, setTrackTempIdx, trackSamplesOnly.length);
+  const airNav = makeNav(airTempIdx, setAirTempIdx, airSamplesOnly.length);
+
+  React.useEffect(() => {
+    const maxWeather = Math.max(0, weatherSamples.length - 1);
+    const maxTrack = Math.max(0, trackSamplesOnly.length - 1);
+    const maxAir = Math.max(0, airSamplesOnly.length - 1);
+    if (weatherIdx > maxWeather) setWeatherIdx(maxWeather);
+    if (trackTempIdx > maxTrack) setTrackTempIdx(maxTrack);
+    if (airTempIdx > maxAir) setAirTempIdx(maxAir);
+  }, [weatherSamples.length, trackSamplesOnly.length, airSamplesOnly.length, weatherIdx, trackTempIdx, airTempIdx]);
+
+  const wStart = windowStart(weatherIdx, weatherSamples.length);
+  const tStart = windowStart(trackTempIdx, trackSamplesOnly.length);
+  const aStart = windowStart(airTempIdx, airSamplesOnly.length);
+  const wSamples = windowSamples(weatherSamples, wStart);
+  const tSamples = windowSamples(trackSamplesOnly, tStart);
+  const aSamples = windowSamples(airSamplesOnly, aStart);
+
+  const isNight = isNightTime(session?.time_of_day);
+  const curWeather = getWeatherMeta(session?.weather, isNight);
+
   if (!session) {
     return (
       <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
@@ -101,67 +210,6 @@ export const SessionInfo: React.FC = () => {
       </div>
     );
   }
-
-  const sessionDuration = session.session_duration || 0;
-  const timeLeft = session.session_time_left || 0;
-  const canShowElapsed = sessionDuration > 0 && timeLeft >= 0 && timeLeft <= sessionDuration;
-  const elapsedTime = canShowElapsed ? Math.max(0, sessionDuration - timeLeft) : 0;
-  const minutes = Math.floor(elapsedTime / 60);
-  const seconds = elapsedTime % 60;
-
-  const status = STATUS_META[session.safety_car_status] ?? STATUS_META[0];
-
-  const forecastSamples = session.weather_forecast_samples ?? [];
-  const samples = Object.values(
-    forecastSamples.reduce((acc, f) => {
-      acc[f.time_offset] = f;
-      return acc;
-    }, {} as Record<number, (typeof forecastSamples)[number]>)
-  ).sort((a, b) => a.time_offset - b.time_offset);
-  const compactSamples = samples.filter((sample, index) => {
-    if (index === 0) return true;
-    const previous = samples[index - 1];
-    return sample.weather !== previous.weather
-      || sample.rain_percentage !== previous.rain_percentage
-      || sample.track_temperature !== previous.track_temperature
-      || sample.air_temperature !== previous.air_temperature;
-  });
-
-  const currentTrackTemp = session.track_temperature || 0;
-  const currentAirTemp = session.air_temperature || 0;
-  const total = compactSamples.length;
-  const hasWeatherChange = compactSamples.some((sample) =>
-    sample.weather !== session.weather || (sample.rain_percentage ?? 0) > 0
-  );
-  const hasTrackTempChange = compactSamples.some((sample) => sample.track_temperature !== currentTrackTemp);
-  const hasAirTempChange = compactSamples.some((sample) => sample.air_temperature !== currentAirTemp);
-  const hasForecastChanges = hasWeatherChange || hasTrackTempChange || hasAirTempChange;
-
-  const windowStart = (idx: number) => (total ? Math.min(idx, total - 1) : 0);
-  const windowSamples = (start: number) => compactSamples.slice(start, start + 1);
-
-  const makeNav = (idx: number, setIdx: (n: number) => void) => {
-    const maxStart = Math.max(0, total - 1);
-    return {
-      canPrev: total > 1 && idx > 0,
-      canNext: total > 1 && idx < maxStart,
-      prev: () => setIdx(Math.max(0, idx - 1)),
-      next: () => setIdx(Math.min(maxStart, idx + 1)),
-    };
-  };
-  const weatherNav = makeNav(weatherIdx, setWeatherIdx);
-  const trackNav = makeNav(trackTempIdx, setTrackTempIdx);
-  const airNav = makeNav(airTempIdx, setAirTempIdx);
-
-  const wStart = windowStart(weatherIdx);
-  const tStart = windowStart(trackTempIdx);
-  const aStart = windowStart(airTempIdx);
-  const wSamples = windowSamples(wStart);
-  const tSamples = windowSamples(tStart);
-  const aSamples = windowSamples(aStart);
-
-  const isNight = isNightTime(session.time_of_day);
-  const curWeather = getWeatherMeta(session.weather, isNight);
 
   return (
     <div className="bg-f1-dark rounded-lg p-4 shadow-lg">
@@ -199,8 +247,7 @@ export const SessionInfo: React.FC = () => {
           </div>
         </div>
 
-        {/* 预报: 三个分类纵向排 (Weather / Track Temp / Air Temp)
-            每分类一张卡片(带底色圆角), 卡片内样本横向排开(样本本身无边框) */}
+        {/* 预报: 只显示“当前 session”的 future sample (time_offset > 0) */}
         {hasForecastChanges && <div className="space-y-2">
           {/* Weather 卡片 */}
           {hasWeatherChange && <div className="bg-f1-darker rounded-lg p-2.5 min-w-0">
@@ -220,7 +267,7 @@ export const SessionInfo: React.FC = () => {
               <BsChevronLeft className="w-3 h-3" />
             </button>
             <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
-              {total === 0 ? (
+              {weatherSamples.length === 0 ? (
                 <span className="text-[10px] text-gray-600">No forecast</span>
               ) : (
                 wSamples.map((f) => {
@@ -267,7 +314,7 @@ export const SessionInfo: React.FC = () => {
               <BsChevronLeft className="w-3 h-3" />
             </button>
             <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
-              {total === 0 ? (
+              {trackSamplesOnly.length === 0 ? (
                 <span className="text-[10px] text-gray-600">No forecast</span>
               ) : (
                 tSamples.map((f) => (
@@ -303,7 +350,7 @@ export const SessionInfo: React.FC = () => {
               <BsChevronLeft className="w-3 h-3" />
             </button>
             <div className="flex-1 flex items-center justify-center gap-2 overflow-hidden min-w-0">
-              {total === 0 ? (
+              {airSamplesOnly.length === 0 ? (
                 <span className="text-[10px] text-gray-600">No forecast</span>
               ) : (
                 aSamples.map((f) => (

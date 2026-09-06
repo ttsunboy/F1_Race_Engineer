@@ -5,6 +5,7 @@
 export interface SessionData {
   session_uid: number;
   session_time: number;
+  session_type_id?: number;
   session_type: string;
   track_id: string;
   weather: string;
@@ -25,6 +26,8 @@ export interface SessionData {
 }
 
 export interface WeatherForecastSample {
+  session_type_id?: number;
+  session_type?: string;
   time_offset: number;   // 相对当前时刻的分钟数 (F1 UDP 协议字段)
   weather: string;
   track_temperature: number;

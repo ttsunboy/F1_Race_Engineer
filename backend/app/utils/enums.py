@@ -12,10 +12,18 @@ SESSION_TYPES = {
     7: "Qualifying 3",
     8: "Short Qualifying",
     9: "One-Shot Qualifying",
-    10: "Race",
-    11: "Race 2",
-    12: "Race 3",
-    13: "Time Trial",
+    # F1 24/25 protocol: sprint shootout session values live between qualifying and race.
+    # Captured weather-forecast samples from the real game include future-session ids 15=Race,
+    # so the old 10=Race mapping was stale and caused forecast/session labels to drift.
+    10: "Sprint Shootout 1",
+    11: "Sprint Shootout 2",
+    12: "Sprint Shootout 3",
+    13: "Short Sprint Shootout",
+    14: "One-Shot Sprint Shootout",
+    15: "Race",
+    16: "Race 2",
+    17: "Race 3",
+    18: "Time Trial",
 }
 
 # Track IDs
