@@ -322,7 +322,18 @@ class TelemetryService:
         return samples
 
     def _reset_race_state(self):
-        """Clear all per-race state when a new session starts (session_uid changed)."""
+        """Clear all session-scoped state when a new session starts (session_uid changed).
+
+        Important: clear session/cars/timing as well, otherwise the frontend can keep
+        showing stale data from the previous session (e.g. P1/weather/tyres) until the
+        new packets for those domains eventually arrive.
+        """
+        self.current_state["session"] = {}
+        self.current_state["cars"] = {}
+        self.current_state["timing"] = []
+        self.current_state["participants"] = {}
+        self.current_state["player_car_index"] = None
+        self.current_state["car_positions"] = []
         self.current_state["lap_history"] = {}
         self.current_state["best_sectors"] = {}
         self.current_state["current_lap_sectors"] = {}
@@ -330,12 +341,13 @@ class TelemetryService:
         self.current_state["starting_grid"] = {}
         self.current_state["pit_loss"] = None
         self._marshal_zone_flags = {}
+        self._fuel_track = {}
         self.sector_times_cache = {}
         self.last_lap_numbers = {}
         self.last_sectors = {}
         self.last_positions = {}
         self.race_recap_service.reset_session()
-        print("🔄 Per-race state cleared")
+        print("🔄 Session state cleared")
 
     async def _handle_participants_packet(self, packet):
         """Handle participants data packet"""

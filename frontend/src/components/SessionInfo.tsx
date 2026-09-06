@@ -46,6 +46,11 @@ const getWeatherMeta = (weather: string | undefined, night = false) => {
   return meta;
 };
 
+const formatForecastOffset = (offset: number): string => {
+  if (!Number.isFinite(offset)) return '?';
+  return Number.isInteger(offset) ? String(offset) : offset.toFixed(1);
+};
+
 // safety_car_status: 0=绿旗 1=SC 2=VSC 3=编队圈
 const STATUS_META: Record<number, { label: string; cls: string; icon: React.ReactNode; pulse: boolean }> = {
   0: {
@@ -225,13 +230,13 @@ export const SessionInfo: React.FC = () => {
                     <div
                       key={f.time_offset}
                       className="flex flex-col items-center justify-between w-10 h-14 shrink-0 py-1 min-w-0"
-                      title={`${meta.label}${rain > 0 ? ` · 降雨 ${rain}%` : ''} · +${Math.round(f.time_offset)}min`}
+                      title={`${meta.label}${rain > 0 ? ` · 降雨 ${rain}%` : ''} · +${formatForecastOffset(f.time_offset)}min`}
                     >
                       <span className={`text-2xl ${meta.color} leading-none`}>{meta.icon}</span>
                       <span className={`text-[10px] leading-none ${rain > 0 ? 'text-blue-400' : 'text-gray-600'}`}>
                         {rain > 0 ? `${rain}%` : '·'}
                       </span>
-                      <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                      <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{formatForecastOffset(f.time_offset)}min</span>
                     </div>
                   );
                 })
@@ -268,7 +273,7 @@ export const SessionInfo: React.FC = () => {
                 tSamples.map((f) => (
                   <div key={f.time_offset} className="flex flex-col items-center justify-center w-10 h-14 shrink-0 py-1 min-w-0">
                     <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(f.track_temperature)}</span>
-                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{formatForecastOffset(f.time_offset)}min</span>
                   </div>
                 ))
               )}
@@ -304,7 +309,7 @@ export const SessionInfo: React.FC = () => {
                 aSamples.map((f) => (
                   <div key={f.time_offset} className="flex flex-col items-center justify-center w-10 h-14 shrink-0 py-1 min-w-0">
                     <span className="text-xl font-bold text-white leading-none whitespace-nowrap">{formatTemperature(f.air_temperature)}</span>
-                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{Math.round(f.time_offset)}min</span>
+                    <span className="text-[10px] text-gray-300 leading-none whitespace-nowrap">+{formatForecastOffset(f.time_offset)}min</span>
                   </div>
                 ))
               )}

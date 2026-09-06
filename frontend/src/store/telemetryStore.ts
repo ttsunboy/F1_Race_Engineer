@@ -233,8 +233,16 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
         break;
 
       case 'session_reset':
-        // New race started (session_uid changed) - clear per-race state
+        // New session started (session_uid changed) - clear ALL session-scoped state.
+        // Otherwise stale P1/weather/tyres/timing from the previous session can linger
+        // on screen until replacement packets happen to arrive.
         set({
+          session: null,
+          cars: {},
+          timing: [],
+          participants: {},
+          playerCarIndex: null,
+          car_positions: [],
           lap_history: [],
           best_sectors: null,
           current_lap_sectors: null,

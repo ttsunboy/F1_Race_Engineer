@@ -25,7 +25,7 @@ export interface SessionData {
 }
 
 export interface WeatherForecastSample {
-  time_offset: number;   // 相对当前时刻的秒数 (每 3 分钟一个样本)
+  time_offset: number;   // 相对当前时刻的分钟数 (F1 UDP 协议字段)
   weather: string;
   track_temperature: number;
   track_temperature_change: number;
