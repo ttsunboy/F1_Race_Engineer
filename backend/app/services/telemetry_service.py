@@ -541,15 +541,17 @@ class TelemetryService:
                         self.last_sectors[idx] = None
                         self.current_state["current_lap_sectors"][idx] = [0, 0, 0]
 
-                        # Add lap to history
-                        self.current_state["lap_history"][idx].append({
-                            "lap": last_lap,
-                            "time_ms": last_lap_time_ms,
-                            "sectors": [s1_time, s2_time, s3_time],
-                            "tire_compound": car_data.get("tyre_visual_compound", "Unknown"),
-                            "tire_age": car_data.get("tyre_age_laps", 0)
-                        })
-                        self._save_lap_history()
+                        # Add lap to history (dedupe: don't re-record the same lap number)
+                        existing_laps = self.current_state["lap_history"][idx]
+                        if not any(lap.get("lap") == last_lap for lap in existing_laps):
+                            existing_laps.append({
+                                "lap": last_lap,
+                                "time_ms": last_lap_time_ms,
+                                "sectors": [s1_time, s2_time, s3_time],
+                                "tire_compound": car_data.get("tyre_visual_compound", "Unknown"),
+                                "tire_age": car_data.get("tyre_age_laps", 0)
+                            })
+                            self._save_lap_history()
 
                         # Update best sectors
                         if idx not in self.current_state["best_sectors"]:
